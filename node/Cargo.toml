@@ -9,6 +9,8 @@ edition = "2021"
 config = { package = "config", path="../config"}
 appxcon = { package = "appxcon", path="../consensus/appxcon"}
 delphi = { package = "delphi", path="../consensus/delphi"}
+acs = { package = "aacs", path="../consensus/aacs"}
+dkg = { package = "ladkg", path = "../ladkg"}
 delphi_rbc = { package = "delphi-rbc", path="../consensus/delphi-rbc"}
 fin = {package = "fin", path = "../consensus/fin"}
 hyb_appxcon = {package = "hyb_appxcon", path = "../consensus/hyb_appxcon"}
@@ -28,4 +30,12 @@ simple_logger="*"
 fnv = "1.0.3"
 signal-hook = "0"
 
-network = { package = "network", git = "https://github.com/libdist-rs/libnet-rs.git" }
+network = { package = "network", git = "https://github.com/akhilsb/libnet-rs.git" }
+async-trait = "0.1.89"
+futures-util = "0.3.31"
+rand = "0.8"
+
+hashrand = { package = "hashrand", git = "https://github.com/linghe-yang/hashrand-rs.git" }
+hrconfig = {package = "config" , git = "https://github.com/linghe-yang/hashrand-rs.git"}
+hrcrypto = {package = "crypto" , git = "https://github.com/linghe-yang/hashrand-rs.git"}
+crypto = {package = "crypto", path = "../crypto"}

@@ -19,7 +19,8 @@ pub enum SyncState{
 pub struct SyncMsg{
     pub sender:Replica,
     pub state:SyncState,
-    pub value: Val
+    pub value: Val,
+    pub inst_id: usize
 }
 
 impl WireReady for SyncMsg{

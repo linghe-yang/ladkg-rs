@@ -43,7 +43,7 @@ The file [settings.json](https://github.com/asonnino/narwhal/blob/master/benchma
     "client_base_port": 9000,
     "client_run_port": 9500,
     "repo": {
-        "name": "delphi-rs",
+        "name": "ladkg-rs",
         "url": "https://github.com/akhilsb/delphi-rs.git",
         "branch": "master"
     },
@@ -74,8 +74,8 @@ The artifact requires a number of TCP ports for communication between the proces
 The third block (`repo`) contains the information regarding the repository's name, the URL of the repo, and the branch containing the code to deploy: 
 ```json
 "repo": {
-    "name": "delphi-rs",
-    "url": "https://github.com/akhilsb/delphi-rs.git",
+    "name": "ladkg-rs",
+    "url": "https://github.com/akhilsb/ladkg-rs.git",
     "branch": "master"
 },
 ```

@@ -29,5 +29,5 @@ rand = "0.7.3"
 anyhow = "1"
 async-trait = "0"
 futures-util = "0"
-network = { package = "network", git = "https://github.com/libdist-rs/libnet-rs.git" }
+network = { package = "network", git = "https://github.com/akhilsb/libnet-rs.git" }
 nohash-hasher = "0.2.0"

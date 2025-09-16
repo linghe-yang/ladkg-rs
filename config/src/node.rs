@@ -1,8 +1,8 @@
 use serde::{
-    Serialize, 
+    Serialize,
     Deserialize
 };
-use types::Replica;
+use types::{Replica, Val};
 use crypto::Algorithm;
 use fnv::FnvHashMap as HashMap;
 use super::{
@@ -12,16 +12,27 @@ use super::{
 use std::fs::File;
 use std::io::prelude::*;
 use std::net::{SocketAddr, SocketAddrV4};
+use avsss::{PublicKey, SecretKey};
+use crypto::dilithum_sig::PublicKey as DilithiumPublicKey;
+use crypto::dilithum_sig::SecretKey as DilithiumSecretKey;
 use serde_json::from_reader;
 use toml::from_str;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Node {
     /// Node network config
-    pub net_map: HashMap<Replica, String>,
+    pub net_map_delphi: HashMap<Replica, String>,
+    pub net_map_rbc: HashMap<Replica, String>,
+    pub net_map_dkg: HashMap<Replica, String>,
+    pub net_map_drb: HashMap<Replica, String>,
 
     /// Protocol details
-    pub delta: u64,
+    pub delay: u64,
+    pub delphi: DelphiParams,
+    pub acs: ACSParams,
+    pub dkg: DKGParams,
+    pub drb: DRBParams,
+
     pub id: Replica,
     pub num_nodes: usize,
     pub num_faults: usize,
@@ -29,7 +40,7 @@ pub struct Node {
     pub client_port: u16,
     pub client_addr: SocketAddr,
     pub payload: usize,
-    
+
     pub prot_payload: String,
     /// Crypto primitives
     pub crypto_alg: Algorithm,
@@ -44,10 +55,70 @@ pub struct Node {
     pub root_cert: Vec<u8>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct DelphiParams{
+    pub delta: Val,
+    pub epsilon: Val,
+    pub tri: Val,
+    pub expo: f32,
+    pub high_val: Val,
+    pub low_val: Val,
+}
+
+impl Default for DelphiParams {
+    fn default() -> Self {
+        DelphiParams {
+            delta: 10,
+            epsilon: 1,
+            tri: 100000,
+            expo: 2.0,
+            high_val: 10000,
+            low_val: 1,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ACSParams{
+    pub kappa: usize,
+}
+impl Default for ACSParams {
+    fn default() -> Self {
+        ACSParams {
+            kappa: 2,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct DKGParams{
+    pub pks: Vec<(i32,PublicKey)> ,
+    pub sk: SecretKey,
+    pub sig_pks: Vec<(i32, DilithiumPublicKey)>,
+    pub sig_sk: DilithiumSecretKey,
+
+    pub trans_waiting_time: u64
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct DRBParams{
+    pub batch: usize,
+    pub frequency: u32
+}
+
+impl Default for DRBParams {
+    fn default() -> Self {
+        DRBParams{
+            batch: 50,
+            frequency: 25
+        }
+    }
+}
+
 impl Node {
     pub fn validate(&self) -> Result<(), ParseError> {
-        if self.net_map.len() != self.num_nodes+1 {
-            return Err(ParseError::InvalidMapLen(self.num_nodes+1, self.net_map.len()));
+        if self.net_map_delphi.len() != self.num_nodes {
+            return Err(ParseError::InvalidMapLen(self.num_nodes, self.net_map_delphi.len()));
         }
         if 2*self.num_faults >= self.num_nodes {
             return Err(ParseError::IncorrectFaults(self.num_faults, self.num_nodes));
@@ -109,9 +180,16 @@ impl Node {
             client_port: 0,
             client_addr: SocketAddrV4::new("0.0.0.0".parse().unwrap(),5000).into(),
             crypto_alg: Algorithm::ED25519,
-            delta: 50,
+            delay: 50,
+            delphi: DelphiParams::default(),
+            acs: ACSParams::default(),
+            dkg: DKGParams::default(),
+            drb: DRBParams::default(),
             id: 0,
-            net_map: HashMap::default(),
+            net_map_delphi: HashMap::default(),
+            net_map_rbc: HashMap::default(),
+            net_map_dkg: HashMap::default(),
+            net_map_drb: HashMap::default(),
             num_faults: 0,
             num_nodes: 0,
             pk_map: HashMap::default(),
@@ -182,20 +260,20 @@ impl Node {
                     .expect("invalid ip found; unable to split at :")
                     .parse()
                     .expect("failed to parse the port after :");
-                self.net_map.insert(idx, format!("0.0.0.0:{}", port));
+                self.net_map_delphi.insert(idx, format!("0.0.0.0:{}", port));
                 idx += 1;
                 continue;
             }
             // Put others ips in the config
-            self.net_map.insert(idx, ip);
+            self.net_map_delphi.insert(idx, ip);
             idx += 1;
         }
-        log::info!("Talking to servers: {:?}", self.net_map);
+        log::info!("Talking to servers: {:?}", self.net_map_delphi);
     }
 
     pub fn my_ip(&self) -> String {
         // Small string, so it is okay to clone
-        self.net_map.get(&self.id)
+        self.net_map_delphi.get(&self.id)
             .expect("Failed to obtain IP for self. Incorrect config file.")
             .clone()
     }

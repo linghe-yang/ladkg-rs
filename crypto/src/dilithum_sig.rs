@@ -1,0 +1,262 @@
+use std::cmp::Ordering;
+use std::{fmt};
+use std::hash::{Hash, Hasher};
+use pqcrypto_dilithium::dilithium2::{keypair, open, sign, PublicKey as DilithiumPublicKey, SecretKey as DilithiumSecretKey, SignedMessage};
+use pqcrypto_traits::sign::{PublicKey as DilithiumPublicKeyTrait, SecretKey as DilithiumSecretKeyTrait, SignedMessage as DilithiumSignedMessage};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use sha2::{Digest as ShaDigest, Sha256};
+use crate::hash::Hash as DelphiHash;
+
+#[derive(Debug)]
+pub enum CryptoError {
+    InvalidSignature
+}
+impl fmt::Display for CryptoError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CryptoError::InvalidSignature => write!(f, "Invalid signature"),
+        }
+    }
+}
+
+#[repr(transparent)]
+#[derive(Clone, Copy, PartialEq)]
+pub struct PublicKey(DilithiumPublicKey);
+
+impl PublicKey {
+
+    pub fn new_random_test() -> PublicKey {
+        let (pk,_) = keypair();
+        PublicKey(pk)
+    }
+    pub fn to_hash32(&self) -> [u8; 32] {
+        let mut hasher = Sha256::new();
+        hasher.update(self.0.as_bytes());
+        let result = hasher.finalize();
+        result.into()
+    }
+}
+
+impl Eq for PublicKey {}
+
+impl Hash for PublicKey {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.as_bytes().hash(state);
+    }
+}
+
+impl PartialOrd for PublicKey {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for PublicKey {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.0.as_bytes().cmp(other.0.as_bytes())
+    }
+}
+impl Default for PublicKey {
+    fn default() -> Self {
+        let zeroed_data: [u8; 1312] = [0; 1312];
+        let pk = DilithiumPublicKey::from_bytes(&zeroed_data)
+            .expect("Failed to create default PublicKey from zeroed bytes");
+        PublicKey(pk)
+    }
+}
+
+impl Serialize for PublicKey {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let encoded = base64::encode(self.0.as_bytes());
+        serializer.serialize_str(&encoded)
+    }
+}
+
+impl<'de> Deserialize<'de> for PublicKey {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let encoded = String::deserialize(deserializer)?;
+        let bytes = base64::decode(&encoded)
+            .map_err(serde::de::Error::custom)?;
+        let dilithium_pk = DilithiumPublicKey::from_bytes(&bytes)
+            .map_err(serde::de::Error::custom)?;
+        Ok(PublicKey(dilithium_pk))
+    }
+}
+
+// Implement Display trait
+impl fmt::Display for PublicKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let bytes = self.0.as_bytes();
+        let hex = hex::encode(bytes);
+        // Show first 8 characters and append "..."
+        write!(f, "PublicKey({}...)", &hex[..8.min(hex.len())])
+    }
+}
+
+// Implement Debug trait
+impl fmt::Debug for PublicKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let bytes = self.0.as_bytes();
+        let hex = hex::encode(bytes);
+        // Show first 8 characters with "0x" prefix and append "..."
+        f.debug_struct("PublicKey")
+            .field("data", &format_args!("0x{}...", &hex[..8.min(hex.len())]))
+            .finish()
+    }
+}
+impl AsRef<[u8]> for PublicKey {
+    fn as_ref(&self) -> &[u8] {
+        &self.0.as_bytes()
+    }
+}
+
+#[repr(transparent)]
+#[derive(Clone)]
+pub struct SecretKey(DilithiumSecretKey);
+
+
+impl Default for SecretKey {
+    fn default() -> Self {
+        SecretKey(DilithiumSecretKey::from_bytes(&[0u8; 2560]).unwrap())
+    }
+}
+impl Serialize for SecretKey {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let encoded = base64::encode(self.0.as_bytes());
+        serializer.serialize_str(&encoded)
+    }
+}
+
+impl<'de> Deserialize<'de> for SecretKey {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let encoded = String::deserialize(deserializer)?;
+        let bytes = base64::decode(&encoded)
+            .map_err(serde::de::Error::custom)?;
+        let dilithium_sk = DilithiumSecretKey::from_bytes(&bytes)
+            .map_err(serde::de::Error::custom)?;
+        Ok(SecretKey(dilithium_sk))
+    }
+}
+impl fmt::Display for SecretKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let bytes = self.0.as_bytes();
+        let hex = hex::encode(bytes);
+        // Show first 8 characters and append "..."
+        write!(f, "SecretKey({}...)", &hex[..8.min(hex.len())])
+    }
+}
+
+// Implement Debug trait
+impl fmt::Debug for SecretKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let bytes = self.0.as_bytes();
+        let hex = hex::encode(bytes);
+        // Show first 8 characters with "0x" prefix and append "..."
+        f.debug_struct("SecretKey")
+            .field("data", &format_args!("0x{}...", &hex[..8.min(hex.len())]))
+            .finish()
+    }
+}
+
+pub fn generate_production_keypair() -> (PublicKey, SecretKey) {
+    generate_keypair()
+}
+pub fn generate_keypair() -> (PublicKey, SecretKey){
+    let (pk,sk) = keypair();
+    (PublicKey(pk), SecretKey(sk))
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct Signature(SignedMessage);
+
+impl Default for Signature {
+    fn default() -> Self {
+        let empty_signed_message = SignedMessage::from_bytes(&[])
+            .expect("Failed to create empty SignedMessage");
+        Signature(empty_signed_message)
+    }
+}
+impl fmt::Debug for Signature {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let bytes = self.0.as_bytes();
+        let hex = hex::encode(bytes);
+        // Show first 8 characters with "0x" prefix and append "..."
+        f.debug_struct("Signature")
+            .field("data", &format_args!("0x{}...", &hex[..8.min(hex.len())]))
+            .finish()
+    }
+}
+
+impl Eq for Signature {}
+
+impl PartialEq for Signature {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.as_bytes() == other.0.as_bytes()
+    }
+}
+impl Ord for Signature {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.0.as_bytes().cmp(other.0.as_bytes())
+    }
+}
+
+impl PartialOrd for Signature {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Hash for Signature {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.as_bytes().hash(state);
+    }
+}
+
+impl Signature {
+    pub fn new(digest: &DelphiHash, secret: &SecretKey) -> Self {
+        Signature(sign(digest.as_ref(), &secret.0))
+    }
+    pub fn verify(&self, digest: &DelphiHash, public_key: &PublicKey) -> Result<(), CryptoError> {
+        let opened_msg = open(&self.0, &public_key.0).unwrap();
+        if digest.to_vec() == opened_msg {
+            return Ok(());
+        }
+        Err(CryptoError::InvalidSignature)
+
+    }
+    pub fn verify_batch<'a, I>(digest: &DelphiHash, votes: I) -> Result<(), CryptoError>
+    where
+        I: IntoIterator<Item = &'a (PublicKey, Signature)>,
+    {
+        for (key, sig) in votes.into_iter() {
+            sig.verify(digest, key)?;
+        }
+        Ok(())
+    }
+}
+
+
+
+
+#[test]
+fn test_signature_generation_and_verification() {
+    let (public_key, secret_key) = generate_keypair();
+    let mut hasher = Sha256::new();
+    hasher.update(b"test message");
+    let digest: DelphiHash = hasher.finalize().into();
+    let signature = Signature::new(&digest, &secret_key);
+    let verification_result = signature.verify(&digest, &public_key);
+    assert!(verification_result.is_ok(), "Signature verification failed");
+}

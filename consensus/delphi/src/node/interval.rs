@@ -5,10 +5,10 @@ use types::{Round, Point, Lev, Replica, Val};
 use super::RoundStateBin;
 
 /**
- * The Interval object encapsulates the state of one or more checkpoints. 
- * An interval can contain multiple checkpoints. However, it must contain at least one checkpoint. 
- * In our protocol, an interval can represent multiple checkpoints if they have identical state. 
- * Instead of maintaining k different checkpoints and k cloned states, this interval abstraction saves memory by keeping track of checkpoints with identical state. 
+ * The Interval object encapsulates the state of one or more checkpoints.
+ * An interval can contain multiple checkpoints. However, it must contain at least one checkpoint.
+ * In our protocol, an interval can represent multiple checkpoints if they have identical state.
+ * Instead of maintaining k different checkpoints and k cloned states, this interval abstraction saves memory by keeping track of checkpoints with identical state.
  */
 #[derive(Debug,Clone)]
 pub struct Interval{
@@ -20,18 +20,21 @@ pub struct Interval{
     // t+1
     pub minthreshold: usize,
     // n-t
-    pub highthreshold: usize
+    pub highthreshold: usize,
+
+    pub del_inst_id: usize
 }
 
 impl Interval{
-    pub fn new(start:Point, end:Point, lev:Lev, minth: usize, highth:usize)-> Self{
-        return Interval { 
-            state: BTreeMap::new(), 
-            start: start, 
-            end: end, 
-            level: lev, 
-            minthreshold: minth, 
-            highthreshold: highth
+    pub fn new(start:Point, end:Point, lev:Lev, minth: usize, highth:usize, inst_id: usize)-> Self{
+        return Interval {
+            state: BTreeMap::new(),
+            start: start,
+            end: end,
+            level: lev,
+            minthreshold: minth,
+            highthreshold: highth,
+            del_inst_id: inst_id
         }
     }
 
@@ -52,14 +55,14 @@ impl Interval{
      * This happens when the states of checkpoints within this interval diverge (possibly by receiving different ECHO1 and ECHO2 messages).
      */
     pub fn split(&self, index: Point)->(Interval,Interval){
-        log::info!("Interval {}->{} being split at {} in level {}", self.start,self.end,index,self.level);
+        log::debug!("Interval {}->{} being split at {} in level {} at inst: {}", self.start,self.end,index,self.level, self.del_inst_id);
         let mut int_st = self.clone();
         int_st.end = index;
         let mut int_en = self.clone();
         int_en.start = index;
         (int_st,int_en)
     }
-    
+
     // Creates a new RoundStateBin object
     fn new_round_with_echo(&mut self, round:Round,msg:Val,echo_sender:Replica){
         if !self.state.contains_key(&round){
@@ -101,7 +104,7 @@ impl Interval{
     }
 
     /*
-        Starts a new round of Binary Approximate Agreement. 
+        Starts a new round of Binary Approximate Agreement.
      */
     pub fn start_round(&mut self,round:Round,myid:Replica, val:Val,max_val:Val)->(Point,Point,Val){
         if round> 0 && self.state.contains_key(&(round-1)) && self.state.get(&(round-1)).unwrap().terminated(){

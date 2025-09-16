@@ -16,3 +16,4 @@ toml = "0.5"
 bincode = "1"
 log="*"
 fnv = "1"
+avsss = { package = "avsss", git="https://github.com/linghe-yang/lvss.git"}

@@ -1,7 +1,7 @@
 use std::{collections::{HashSet, HashMap}, net::{SocketAddr,SocketAddrV4}, time::{SystemTime, UNIX_EPOCH, Duration}};
 
 use anyhow::{Result, anyhow};
-use appxcon::node::SyncHandler;
+use super::sync_handler::SyncHandler;
 use fnv::FnvHashMap;
 use network::{plaintcp::{TcpReceiver, TcpReliableSender, CancelHandler}, Acknowledgement};
 use tokio::sync::{oneshot, mpsc::{unbounded_channel, UnboundedReceiver}};
@@ -22,21 +22,24 @@ pub struct Syncer{
     exit_rx: oneshot::Receiver<()>,
     /// Cancel Handlers
     pub cancel_handlers: Vec<CancelHandler<Acknowledgement>>,
+    pub del_inst_id: usize,
 }
 
 impl Syncer{
     pub fn spawn(
         net_map: FnvHashMap<Replica,String>,
         cli_addr:SocketAddr,
+        rx_net_to_server: UnboundedReceiver<SyncMsg>,
+        inst_id: usize,
     )-> anyhow::Result<oneshot::Sender<()>>{
         let (exit_tx, exit_rx) = oneshot::channel();
-        let (tx_net_to_server, rx_net_to_server) = unbounded_channel();
-        let cli_addr_sock = cli_addr.port();
-        let new_sock_address = SocketAddrV4::new("0.0.0.0".parse().unwrap(), cli_addr_sock);
-        TcpReceiver::<Acknowledgement, SyncMsg, _>::spawn(
-            std::net::SocketAddr::V4(new_sock_address),
-            SyncHandler::new(tx_net_to_server),
-        );
+        // let (tx_net_to_server, rx_net_to_server) = unbounded_channel();
+        // let cli_addr_sock = cli_addr.port();
+        // let new_sock_address = SocketAddrV4::new("0.0.0.0".parse().unwrap(), cli_addr_sock);
+        // TcpReceiver::<Acknowledgement, SyncMsg, _>::spawn(
+        //     std::net::SocketAddr::V4(new_sock_address),
+        //     SyncHandler::new(tx_net_to_server),
+        // );
         let mut server_addrs :FnvHashMap<Replica,SocketAddr>= FnvHashMap::default();
         println!("{:?}",net_map);
         for (replica,address) in net_map.iter(){
@@ -58,7 +61,8 @@ impl Syncer{
                 rx_net:rx_net_to_server,
                 net_send:net_send,
                 exit_rx:exit_rx,
-                cancel_handlers:Vec::new()
+                cancel_handlers:Vec::new(),
+                del_inst_id: inst_id,
             };
             if let Err(e) = syncer.run().await {
                 log::error!("Consensus error: {}", e);
@@ -98,7 +102,8 @@ impl Syncer{
                                 self.broadcast(SyncMsg { 
                                     sender: self.num_nodes, 
                                     state: SyncState::START,
-                                    value:0
+                                    value:0,
+                                    inst_id: self.del_inst_id,
                                 }).await;
                                 self.start_time = SystemTime::now()
                                 .duration_since(UNIX_EPOCH)
@@ -127,7 +132,7 @@ impl Syncer{
                                 .duration_since(UNIX_EPOCH)
                                 .unwrap()
                                 .as_millis(); 
-                                self.broadcast(SyncMsg { sender: self.num_nodes, state: SyncState::StartRecon, value:0 }).await;
+                                self.broadcast(SyncMsg { sender: self.num_nodes, state: SyncState::StartRecon, value:0, inst_id: self.del_inst_id }).await;
                             }
                         },
                         SyncState::CompletedRecon=>{
@@ -144,7 +149,7 @@ impl Syncer{
                                 }
                                 vec_times.sort();
                                 log::info!("All n nodes completed the recon protocol {:?} {:?}",vec_times,self.values);
-                                self.broadcast(SyncMsg { sender: self.num_nodes, state: SyncState::STOP, value:0}).await;
+                                self.broadcast(SyncMsg { sender: self.num_nodes, state: SyncState::STOP, value:0, inst_id: self.del_inst_id}).await;
                             }
                         },
                         SyncState::COMPLETED=>{
@@ -162,7 +167,7 @@ impl Syncer{
                                 }
                                 vec_times.sort();
                                 log::info!("All n nodes completed the protocol {:?} with values {:?}",vec_times,self.values);
-                                self.broadcast(SyncMsg { sender: self.num_nodes, state: SyncState::STOP, value:0}).await;
+                                self.broadcast(SyncMsg { sender: self.num_nodes, state: SyncState::STOP, value:0, inst_id: self.del_inst_id}).await;
                             }
                         }
                         _=>{}

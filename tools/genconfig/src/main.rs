@@ -2,15 +2,18 @@
 // protocol.
 
 use crypto::{ed25519, secp256k1::{self,SecretKey}};
-use config::{Node, Client};
+use config::{Node, Client, DelphiParams, ACSParams, DKGParams, DRBParams};
 use clap::{load_yaml, App};
 use rand::Rng;
-use types::Replica;
+use types::{Replica, Val};
 use crypto::Algorithm;
 use std::{error::Error, io::{BufWriter, Write}, fs::File};
+use avsss::{PublicKey, VE};
 use util::io::*;
 use fnv::FnvHashMap as HashMap;
-
+use crypto::dilithum_sig::generate_keypair;
+use crypto::dilithum_sig::PublicKey as DilithiumPublicKey;
+use crypto::dilithum_sig::SecretKey as DilithiumSecretKey;
 // fn new_root_cert() -> Result<(X509, PKey<Private>), ErrorStack> {
 //     let rsa = Rsa::generate(2048)?;
 //     let privkey = PKey::from_rsa(rsa)?;
@@ -146,11 +149,43 @@ fn main() -> Result<(), Box<dyn Error>> {
             .expect("unable to convert number of faults into a number"),
         None => (num_nodes-1)/3,
     };
+    let delta = m.value_of("delta")
+        .expect("Value required").parse::<Val>().unwrap();
+    let epsilon = m.value_of("epsilon")
+        .expect("Value required").parse::<Val>().unwrap();
+    let tri = m.value_of("tri")
+        .expect("Value required").parse::<Val>().unwrap();
+    let expo = m.value_of("expo")
+        .expect("Unable to parse exponent").parse::<f32>().unwrap();
+    let kappa:usize = match m.value_of("kappa") {
+        Some(x) => x.parse::<usize>()
+            .expect("unable to convert kappa into a number"),
+        None => (num_nodes-1)/3 + 1,
+    };
+
+    let trans_delay:u64 = match m.value_of("trans_delay") {
+        Some(x) => x.parse::<u64>()
+            .expect("unable to convert trans_delay into a number"),
+        None => 500,
+    };
+
     let delay:u64 = m.value_of("delay")
         .expect("delay value not specified")
         .parse::<u64>()
         .expect("unable to parse delay value into a number");
     let base_port: u16 = m.value_of("base_port")
+        .expect("base_port value not specified")
+        .parse::<u16>()
+        .expect("failed to parse base_port into a number");
+    let rbc_base_port: u16 = m.value_of("rbc_base_port")
+        .expect("base_port value not specified")
+        .parse::<u16>()
+        .expect("failed to parse base_port into a number");
+    let dkg_base_port: u16 = m.value_of("dkg_base_port")
+        .expect("base_port value not specified")
+        .parse::<u16>()
+        .expect("failed to parse base_port into a number");
+    let drb_base_port: u16 = m.value_of("drb_base_port")
         .expect("base_port value not specified")
         .parse::<u16>()
         .expect("failed to parse base_port into a number");
@@ -182,6 +217,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         .expect("Client port expected")
         .parse::<u16>()
         .expect("unable to parse client's port into an integer");
+    let hashrand_batch = m.value_of("hashrand_batch")
+        .expect("Unable to parse hashrand_batch").parse::<usize>().unwrap();
+    let hashrand_freq = m.value_of("hashrand_freq")
+        .expect("Unable to parse hashrand_freq").parse::<u32>().unwrap();
     let mut client = Client::new();
     client.block_size = blocksize;
     client.crypto_alg = t.clone();
@@ -192,7 +231,10 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut pk = HashMap::default();
     let mut ip = HashMap::default();
-    
+    let mut ip_rbc = HashMap::default();
+    let mut ip_dkg = HashMap::default();
+    let mut ip_drb = HashMap::default();
+
     //let (cert, privkey) = new_root_cert()?;
     let mut sec_keys:Vec<Vec<SecretKey>> = Vec::with_capacity(num_nodes);
     (0..num_nodes).for_each(|_i| {
@@ -211,10 +253,55 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         }
     }
+    let mut ve_key_pairs = Vec::new();
+    let mut dilithium_key_pairs = Vec::new();
+
+    for i in 0..num_nodes{
+        let (ve_pk,ve_sk) = VE::gen_keypair();
+        ve_key_pairs.push((i,ve_pk,ve_sk));
+        let (sig_pk, sig_sk) = generate_keypair();
+        dilithium_key_pairs.push((i,sig_pk,sig_sk));
+    }
+
     for i in 0..num_nodes {
         node.push(Node::new());
+        let delphi = DelphiParams {
+            delta,
+            epsilon,
+            tri,
+            expo,
+            high_val: 1 + tri,
+            low_val: 1,
+        };
 
-        node[i].delta = delay;
+        let acs = ACSParams {
+            kappa,
+        };
+
+        let pks: Vec<(i32, PublicKey)> = ve_key_pairs.iter().map(|(i,pk,_)| ((i+1) as i32,pk.clone())).collect();
+        let sk = ve_key_pairs[i].2.clone();
+
+        let sig_pks: Vec<(i32, DilithiumPublicKey)> = dilithium_key_pairs.iter().map(|(i,pk,_)| ((i+1) as i32,pk.clone())).collect();
+        let sig_sk = dilithium_key_pairs[i].2.clone();
+        let dkg = DKGParams {
+            pks,
+            sk,
+            sig_pks,
+            sig_sk,
+            trans_waiting_time: trans_delay
+        };
+
+        let drb = DRBParams {
+            batch: hashrand_batch,
+            frequency: hashrand_freq,
+        };
+
+
+        node[i].delphi = delphi;
+        node[i].acs = acs;
+        node[i].dkg = dkg;
+        node[i].drb = drb;
+        node[i].delay = delay;
         node[i].id = i as Replica;
         node[i].num_nodes = num_nodes;
         node[i].num_faults = num_faults;
@@ -246,11 +333,20 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
             _ => (),
         };
-        ip.insert(i as Replica, 
-        format!("{}:{}", "127.0.0.1", base_port+(i as u16))
+        ip.insert(i as Replica,
+                  format!("{}:{}", "127.0.0.1", base_port+(i as u16))
         );
-        client.net_map.insert(i as Replica, 
-        format!("127.0.0.1:{}", client_base_port+(i as u16))
+        ip_rbc.insert(i as Replica,
+                      format!("{}:{}", "127.0.0.1", rbc_base_port+(i as u16))
+        );
+        ip_dkg.insert(i as Replica,
+                      format!("{}:{}", "127.0.0.1", dkg_base_port+(i as u16))
+        );
+        ip_drb.insert(i as Replica,
+                      format!("{}:{}", "127.0.0.1", drb_base_port+(i as u16))
+        );
+        client.net_map.insert(i as Replica,
+                              format!("127.0.0.1:{}", client_base_port+(i as u16))
         );
 
 
@@ -260,12 +356,17 @@ fn main() -> Result<(), Box<dyn Error>> {
         //node[i].my_cert = new_cert.to_der()?;
         //node[i].my_cert_key = new_pkey.private_key_to_der()?;
     }
-    ip.insert(num_nodes, format!("127.0.0.1:{}",c_rport));
+
+    // ip.insert(num_nodes, format!("127.0.0.1:{}",c_rport));
+
     //client.root_cert = cert.to_der()?;
 
     for i in 0..num_nodes {
         node[i].pk_map = pk.clone();
-        node[i].net_map = ip.clone();
+        node[i].net_map_delphi = ip.clone();
+        node[i].net_map_rbc = ip_rbc.clone();
+        node[i].net_map_dkg = ip_dkg.clone();
+        node[i].net_map_drb = ip_drb.clone();
     }
     if local != String::from("false"){
         // write ip map to file
@@ -275,7 +376,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         {
             let file = File::create("ip_file")?;
             let mut writer = BufWriter::new(file);
-            for iter in 0..num_nodes+1{
+            for iter in 0..num_nodes{
                 writeln!(writer,"{}",ip.get(&iter).unwrap())?;
             }
             writer.flush()?;

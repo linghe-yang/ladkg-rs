@@ -2,12 +2,10 @@ use std::{sync::Arc};
 
 use crypto::hash::{verf_mac};
 use types::{appxcon::{WrapperMsg, ProtMsg}};
-use crate::node::{
-    context::Context
-};
+use crate::node::{context::Delphi};
 
 
-impl Context{
+impl Delphi{
     pub fn check_proposal(&self,wrapper_msg: Arc<WrapperMsg>) -> bool {
         // validate MAC
         let byte_val = bincode::serialize(&wrapper_msg.protmsg).expect("Failed to serialize object");

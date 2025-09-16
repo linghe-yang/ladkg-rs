@@ -72,7 +72,7 @@ pub enum ProtMsg{
     // Leader election invocation number, index of coin, Signature, Sender replica
     LeaderCoin(Round,usize,Vec<u8>,Replica),
     // Leader Round, BBA number, Signature, Sender
-    BBACoin(Round,Round,Vec<u8>,Replica)
+    BBACoin(Round,Round,Vec<u8>,Replica),
 }
 
 #[derive(Debug,Serialize,Deserialize,Clone)]
@@ -101,17 +101,19 @@ pub struct WrapperMsg{
     pub protmsg: ProtMsg,
     pub sender:Replica,
     pub mac:Hash,
+    pub inst_id:usize
 }
 
 impl WrapperMsg{
-    pub fn new(msg:ProtMsg,sender:Replica, sk: &[u8]) -> Self{
+    pub fn new(msg:ProtMsg,sender:Replica, sk: &[u8], id: usize) -> Self{
         let new_msg = msg.clone();
         let bytes = bincode::serialize(&new_msg).expect("Failed to serialize protocol message");
         let mac = do_mac(&bytes.as_slice(), sk);
         Self{
             protmsg: new_msg,
             mac: mac,
-            sender:sender
+            sender:sender,
+            inst_id:id
         }
     }
 }

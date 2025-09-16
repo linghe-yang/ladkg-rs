@@ -18,3 +18,4 @@ pub mod ed25519;
 pub mod error;
 pub mod rsa;
 pub mod secp256k1;
+pub mod dilithum_sig;

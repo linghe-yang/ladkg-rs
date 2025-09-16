@@ -1,22 +1,22 @@
 use types::{Replica, SyncMsg, SyncState, appxcon::{ProtMsg, DelphiMsg}, Round, Val, Point, Lev};
 
-use crate::node::{Context};
+use crate::node::{Delphi};
 
-impl Context{
+impl Delphi {
     /**
-     * This function contains code to process an ECHO1 message from other nodes. 
-     * An ECHO1 message is sent as part of the Binary Approximate Agreement (BinAA) protocol. 
-     * Please refer to Algorithm 1 in our paper for the protocol's description. 
+     * This function contains code to process an ECHO1 message from other nodes.
+     * An ECHO1 message is sent as part of the Binary Approximate Agreement (BinAA) protocol.
+     * Please refer to Algorithm 1 in our paper for the protocol's description.
      */
     #[async_recursion::async_recursion]
-    pub async fn process_baa_echo(self: &mut Context, msg:DelphiMsg, echo_sender:Replica, round:Round){
+    pub async fn process_baa_echo(self: &mut Delphi, msg:DelphiMsg, echo_sender:Replica, round:Round){
         if self.round > round{
             return;
         }
-        log::info!("Received ECHO1 message from node {} with content {:?} for round {}",echo_sender,msg,round);
-        // We coalesce an ECHO1 message. AN ECHO1 message can contain ECHO1s from various BinAA instances from 
+        log::debug!("Received ECHO1 message from node {} with content {:?} for round {} at inst: {}",echo_sender,msg,round, self.del_inst_id);
+        // We coalesce an ECHO1 message. AN ECHO1 message can contain ECHO1s from various BinAA instances from
         // various checkpoints at various levels. In order to save network bandwidth, we `coalesce` messages
-        // from multiple checkpoints at each level into a single message. Refer to our paper for more details. 
+        // from multiple checkpoints at each level into a single message. Refer to our paper for more details.
         let mut levels_vals = msg.vals.clone();
         let coalesced_msg = msg.coalesce.clone();
         if coalesced_msg.1 < self.total_levels{
@@ -29,7 +29,7 @@ impl Context{
             if self.round_state.contains_key(&level){
                 let level_state = self.round_state.get_mut(&level).unwrap();
                 // Each level has its own state. It comprises of checkpoints from [Integer.MIN_VALUE,Integer.MAX_VALUE] separated by \rho distance.
-                // We run an approximate agreement instance for each checkpoint in the level. 
+                // We run an approximate agreement instance for each checkpoint in the level.
                 let (echo1,echo2) = level_state.add_echo(interval_vals, round, echo_sender);
                 if !echo1.is_empty(){
                     echo1msgs.push((level,echo1));
@@ -57,27 +57,27 @@ impl Context{
             self.process_baa_echo2( msg, self.myid, round).await;
         }
         if terminated {
-            log::info!("Terminated round {}, starting round {}",round,round+1);
-            self.start_baa(round+1).await;
+            log::info!("Terminated round {}, starting round {} at inst: {}",round,round+1, self.del_inst_id);
+            self.start_baa(round+1,self.del_inst_id).await;
             return;
         }
     }
 
     /**
-     * This function contains code to process an ECHO2 message from other nodes. 
-     * An ECHO2 message is sent as part of the Binary Approximate Agreement (BinAA) protocol. 
-     * Please refer to Algorithm 1 in our paper for the protocol's description. 
+     * This function contains code to process an ECHO2 message from other nodes.
+     * An ECHO2 message is sent as part of the Binary Approximate Agreement (BinAA) protocol.
+     * Please refer to Algorithm 1 in our paper for the protocol's description.
      */
-    pub async fn process_baa_echo2(self: &mut Context, msg: DelphiMsg, echo2_sender:Replica, round:Round){
+    pub async fn process_baa_echo2(self: &mut Delphi, msg: DelphiMsg, echo2_sender:Replica, round:Round){
         // discard older messages
         if self.round > round{
             return;
         }
-        log::info!("Received ECHO2 message from node {} with content {:?} for round {}",echo2_sender,msg,round);
+        log::debug!("Received ECHO2 message from node {} with content {:?} for round {} at inst: {}",echo2_sender,msg,round, self.del_inst_id);
         if self.round > round{
             return;
         }
-        // We coalesce an ECHO2 message. An ECHO2 message can contain ECHO2s from various BinAA instances from 
+        // We coalesce an ECHO2 message. An ECHO2 message can contain ECHO2s from various BinAA instances from
         // various checkpoints at various levels. In order to save network bandwidth, we `coalesce` messages
         // from multiple checkpoints at each level into a single message. Refer to our paper for more details.
         let mut levels_vals = msg.vals.clone();
@@ -97,8 +97,8 @@ impl Context{
             terminated = terminated && level_state.1.terminated_round(round);
         }
         if terminated {
-            log::info!("Terminated round {}, starting round {}",round,round+1);
-            self.start_baa(round+1).await;
+            log::info!("Terminated round {}, starting round {} at inst: {}",round,round+1, self.del_inst_id);
+            self.start_baa(round+1, self.del_inst_id).await;
             return;
         }
     }
@@ -108,13 +108,15 @@ impl Context{
      * We start a new round r only after all approximate agreement instances representing all checkpoints at all levels terminate round r-1.
      */
     #[async_recursion::async_recursion]
-    pub async fn start_baa(self: &mut Context, round:Round){
+    pub async fn start_baa(self: &mut Delphi, round:Round, inst_id: usize){
         self.round = round;
-        // If maximum number of rounds are run, terminate protocol by sending a Completed message to the syncer. 
+        // If maximum number of rounds are run, terminate protocol by sending a Completed message to the syncer.
         if self.round > self.total_rounds_bin{
             let final_val = self.aggregate();
-            let cancel_handler = self.sync_send.send(0, SyncMsg { sender: self.myid, state: SyncState::CompletedSharing, value: final_val }).await;
-            self.add_cancel_handler(cancel_handler);
+            self.consensus_tx.send((self.del_inst_id, final_val)).await.expect("fail to send final value");
+            // log::info!("Inst {}: Terminated Approximate Agreement protocol, output: {}",self.del_inst_id,final_val);
+            // let cancel_handler = self.sync_send.lock().await.send(0, SyncMsg { sender: self.myid, state: SyncState::CompletedSharing, value: final_val, inst_id }).await;
+            // self.add_cancel_handler(cancel_handler);
             return;
         }
         let mut echo_msgs = Vec::new();
@@ -131,11 +133,11 @@ impl Context{
         let prot_msg = ProtMsg::BinaryAAEcho(delphi_msg.clone(), self.myid,round);
         self.broadcast(prot_msg.clone()).await;
         self.process_baa_echo(delphi_msg, self.myid, round).await;
-        log::info!("Broadcasted message {:?}",prot_msg);
+        log::debug!("Broadcasted message {:?} at inst: {}",prot_msg, self.del_inst_id);
     }
 
     /**
-     * This function expands a coalesced message. Check the coalesce subroutine. This coalescing and expanding saves network bandwidth. 
+     * This function expands a coalesced message. Check the coalesce subroutine. This coalescing and expanding saves network bandwidth.
      */
     pub async fn expand(coalesced_msg:(Point,Lev,Lev,Round),rho:Val,max_input:Val, exponent:f32)->Vec<(Lev, Vec<(Point, Point, Val)>)>{
         let mut levels_vals = Vec::new();
@@ -159,9 +161,9 @@ impl Context{
     }
 
     /**
-     * Coalesce subroutine: If all levels $l>=l_t$ has only one checkpoint with a positive weight, we send a coalesce message. 
+     * Coalesce subroutine: If all levels $l>=l_t$ has only one checkpoint with a positive weight, we send a coalesce message.
      * This message compresses messages from levels $l>=l_t$ into a single message (\mu,l_t,l_max,round).
-     * This signifies all levels >l_t have only one non-zero weight. This non-zero weight is for the interval containing \mu.  
+     * This signifies all levels >l_t have only one non-zero weight. This non-zero weight is for the interval containing \mu.
      */
     pub fn coalesce(echos: Vec<(Lev,Vec<(Point,Point,Val)>)>,max_levels:Lev,max_input:Val,round:Round)->((Point,Lev,Lev,Round),Vec<(Lev,Vec<(Point,Point,Val)>)>){
         let mut level_thresh = max_levels+1;
@@ -194,11 +196,11 @@ impl Context{
     }
 
     /**
-     * This function contains the aggregation logic described in the Delphi protocol. 
-     * It is invoked after total_rounds_bin rounds of Binary AA are terminated for all checkpoints at all levels. 
-     * Check our paper for more details about the aggregation logic. 
+     * This function contains the aggregation logic described in the Delphi protocol.
+     * It is invoked after total_rounds_bin rounds of Binary AA are terminated for all checkpoints at all levels.
+     * Check our paper for more details about the aggregation logic.
      */
-    pub fn aggregate(&self)->Val{
+    pub fn aggregate(&self) ->Val{
         let mut weights = Vec::new();
         let mut values = Vec::new();
         for level in 0..self.total_levels{
@@ -209,7 +211,7 @@ impl Context{
             let mut weighted_sum:i128 = 0;
             for (_int_s,interval) in level_state.intervals.iter(){
                 let term_weight = interval.term_value(self.total_rounds_bin) as i128;
-                log::info!("Interval {}->{} in level {} has weight {}",interval.start,interval.end,level,term_weight);
+                log::debug!("Interval {}->{} in level {} has weight {} at inst:{}",interval.start,interval.end,level,term_weight, self.del_inst_id);
                 let midpoint = (interval.start+interval.end)/2;
                 if term_weight> max_lev_weight{
                     max_lev_weight = term_weight as i128;
@@ -219,13 +221,13 @@ impl Context{
                 weighted_sum += (midpoint as i128)*(term_weight as i128);
             }
             if weight_sum == 0{
-                log::info!("Zero weight for level {}",level);
+                log::debug!("Zero weight for level {} at inst: {}",level, self.del_inst_id);
                 weight_sum = self.epsilon as i128;
                 weighted_sum = self.value as i128;
                 max_lev_weight = self.epsilon as i128;
             }
             else{
-                log::info!("Level weight:{}, level sum:{} for level {}",weight_sum,weighted_sum,level);
+                log::debug!("Level weight:{}, level sum:{} for level {} at inst: {}",weight_sum,weighted_sum,level, self.del_inst_id);
             }
             let weighted_avg = weighted_sum/weight_sum;
             values.push(weighted_avg);
@@ -233,7 +235,7 @@ impl Context{
         }
         let mut level_wise_average:i128 = 0;
         let mut level_wise_weight:i128 = 0;
-        log::info!("Final weights: {:?}, values:{:?}",weights,values);
+        log::debug!("Final weights: {:?}, values:{:?} at inst: {}",weights,values, self.del_inst_id);
         for level in 0..self.total_levels{
             let level_weight;
             if level>0{
@@ -247,7 +249,8 @@ impl Context{
             level_wise_weight += level_weight;
         }
         let final_val = (level_wise_average/level_wise_weight) as Val;
-        log::info!("Terminated Approximate Agreement protocol, output: {}",final_val);
+
+
         final_val
     }
 }

@@ -1,0 +1,23 @@
+[package]
+name = "ladkg"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+config = { package = "config", path="../config"}
+types = { package = "types", path="../types"}
+crypto = {package = "crypto", path = "../crypto"}
+acs = {package = "aacs", path= "../consensus/aacs"}
+network = { package = "network", git = "https://github.com/akhilsb/libnet-rs.git" }
+avsss = { package = "avsss", git = "https://github.com/linghe-yang/lvss.git"}
+hashrand = { package = "hashrand", git = "https://github.com/linghe-yang/hashrand-rs.git" }
+hrconfig = {package = "config" , git = "https://github.com/linghe-yang/hashrand-rs.git"}
+hrcrypto = {package = "crypto" , git = "https://github.com/linghe-yang/hashrand-rs.git"}
+tokio = { version = "1.47.1", features = ["full"] }
+log="*"
+fnv = "1"
+anyhow = "1"
+async-trait = "0"
+futures-util = "0"
+rand = "0.8"
+nalgebra = "0.25.3"

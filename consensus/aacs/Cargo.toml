@@ -1,0 +1,17 @@
+[package]
+name = "aacs"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+config = { package = "config", path="../../config"}
+types = { package = "types", path="../../types"}
+delphi = { package = "delphi" , path="../delphi"}
+tokio = { version = "1.0", features = ["full"] }
+log="*"
+fnv = "1"
+anyhow = "1"
+network = { package = "network", git = "https://github.com/akhilsb/libnet-rs.git" }
+async-trait = "0"
+futures-util = "0"
+rand = "0.8"

@@ -8,31 +8,33 @@ use super::Interval;
 pub struct Level{
     pub num: Lev,
     pub intervals: BTreeMap<Point,Interval>,
-    pub sep: Val
+    pub sep: Val,
+    pub del_inst_id: usize,
 }
 /**
- * The Level object contains a list of all intervals (and checkpoints) from i64::MIN to i64::MAX. 
- * Checkpoints within this level are spaced by sep. 
- * A level is initiated with the node's value v_i. We create three intervals from MIN to v_1-\sep, v_1-\sep to v_1+\sep, v_1 + sep to MAX. 
+ * The Level object contains a list of all intervals (and checkpoints) from i64::MIN to i64::MAX.
+ * Checkpoints within this level are spaced by sep.
+ * A level is initiated with the node's value v_i. We create three intervals from MIN to v_1-\sep, v_1-\sep to v_1+\sep, v_1 + sep to MAX.
  */
 impl Level{
-    pub fn new(sep:Val, num:Lev, val: Val, minth: usize, highth:usize)-> Self{
+    pub fn new(sep:Val, num:Lev, val: Val, minth: usize, highth:usize, inst_id: usize)-> Self{
         // Find nearest multiple of sep to val.
         let interval_start = ((val/sep)-1)*(sep);
         let interval_end = ((val/sep)+2)*(sep);
-        let int_s = Interval::new(i64::MIN, interval_start, num, minth, highth);
-        let int_2s = Interval::new(interval_start, interval_end, num, minth, highth);
-        let int_3s = Interval::new(interval_end, i64::MAX, num, minth, highth);
+        let int_s = Interval::new(i64::MIN, interval_start, num, minth, highth, inst_id);
+        let int_2s = Interval::new(interval_start, interval_end, num, minth, highth, inst_id);
+        let int_3s = Interval::new(interval_end, i64::MAX, num, minth, highth, inst_id);
 
         let mut interval_map = BTreeMap::new();
         interval_map.insert(i64::MIN, int_s);
         interval_map.insert(interval_start,int_2s);
         interval_map.insert(interval_end, int_3s);
 
-        Level { 
-            num: num, 
+        Level {
+            num: num,
             intervals: interval_map,
-            sep: sep 
+            sep: sep,
+            del_inst_id: inst_id,
         }
     }
 
@@ -45,17 +47,17 @@ impl Level{
             }
             terminated = terminated && interval.round_terminate(round);
         }
-        log::info!("In level {}, intervals {:?} have not terminated round {}", self.num,term_vec, round);
+        log::debug!("In level {}, intervals {:?} have not terminated round {} at inst: {}", self.num,term_vec, round, self.del_inst_id);
         terminated
     }
 
     /**
-     * This method handles ECHO1 messages for multiple checkpoints within the level. 
+     * This method handles ECHO1 messages for multiple checkpoints within the level.
      */
     pub fn add_echo(&mut self, interval_vals:Vec<(Point,Point,Val)>, round:Round, echo_sender:Replica)->(Vec<(Point,Point,Val)>,Vec<(Point,Point,Val)>){
-        // Interval vals is a vector of (p1,p2,Val), which indicates an ECHO1 for value Val for all checkpoints between starting point p1 and ending point p2. 
-        
-        // List of echo1 messages and echo2 messages to send to broadcast. 
+        // Interval vals is a vector of (p1,p2,Val), which indicates an ECHO1 for value Val for all checkpoints between starting point p1 and ending point p2.
+
+        // List of echo1 messages and echo2 messages to send to broadcast.
         let mut echo1msgs:Vec<(Point,Point,Val)> = Vec::new();
         let mut echo2msgs:Vec<(Point,Point,Val)> = Vec::new();
         for (start,end,value) in interval_vals.into_iter(){
@@ -133,11 +135,11 @@ impl Level{
         (echo1msgs,echo2msgs)
     }
 
-     /**
-     * This method handles ECHO2 messages for multiple checkpoints within the level. 
-     */
+    /**
+    * This method handles ECHO2 messages for multiple checkpoints within the level.
+    */
     pub fn add_echo2(&mut self, interval_vals:Vec<(Point,Point,Val)>, round:Round, echo_sender:Replica){
-        // Interval vals is a vector of (p1,p2,Val), which indicates an ECHO2 for value Val for all checkpoints between starting point p1 and ending point p2. 
+        // Interval vals is a vector of (p1,p2,Val), which indicates an ECHO2 for value Val for all checkpoints between starting point p1 and ending point p2.
         for (start,end,value) in interval_vals.into_iter(){
             let mut new_interval_map = BTreeMap::new();
             for (_interval_start,interval) in self.intervals.iter(){
@@ -180,20 +182,20 @@ impl Level{
     }
     /**
      * Compress message compresses messages from multiple intervals into a single message (in case such a compression is possible).
-     * Say there are two messages (start1,end1,V1) and (end1,end2,V1). This routine creates a single message (start1,end2,V1). 
-     * This operation saves network bandwidth by reducing redundant information sent. 
+     * Say there are two messages (start1,end1,V1) and (end1,end2,V1). This routine creates a single message (start1,end2,V1).
+     * This operation saves network bandwidth by reducing redundant information sent.
      */
     pub fn compress(mut interval_vals:Vec<(Point,Point,Val)>, lev:Lev)->Vec<(Point,Point,Val)>{
         if interval_vals.len() > 1{
             let num = interval_vals.len();
             let last_val = interval_vals[num-1];
             let mut last_but_one = interval_vals.get_mut(num-2).unwrap();
-            log::info!("Compress fn: Last interval: {:?}, last_but_one: {:?} in level {}",last_val,last_but_one,lev);
+            log::debug!("Compress fn: Last interval: {:?}, last_but_one: {:?} in level {}",last_val,last_but_one,lev);
             if last_but_one.2 == last_val.2 && last_but_one.1 == last_val.0{
                 last_but_one.1 = last_val.1;
                 interval_vals.pop();
             }
-            log::info!("Compress fn: Vals after compress: {:?}",interval_vals);
+            log::debug!("Compress fn: Vals after compress: {:?}",interval_vals);
             interval_vals
         }
         else {
@@ -201,7 +203,7 @@ impl Level{
         }
     }
     /**
-     * Starts new round. 
+     * Starts new round.
      */
     pub fn start_round(&mut self, round:Round, myid:Replica,val:Val, max_val:Val)->Vec<(Point,Point,Val)>{
         let mut echo_vec:Vec<(Point,Point,Val)> = Vec::new();
