@@ -18,25 +18,10 @@ args:
         long: ip
         help: A file containing all the ips for the other servers
         takes_value: true
-#    - delta:
-#        short: d
-#        long: delta
-#        help: the protocol delta value
-#        takes_value: true
-    - val:
-        short: z
-        long: val
-        help: Value to start approximate consensus
-        takes_value: true
-#    - epsilon:
-#        short: e
-#        long: epsilon
-#        help: epsilon required
-#        takes_value: true
-#    - tri:
-#        short: t
-#        long: tri
-#        help: tri value required
+#    - val:
+#        short: z
+#        long: val
+#        help: Value to start approximate consensus
 #        takes_value: true
     - sleep:
         long: sleep
@@ -62,8 +47,3 @@ args:
         long: rand
         help: Seed random string for running protocols
         takes_value: true
-#    - expo:
-#        short: p
-#        long: expo
-#        help: Exponent for incrementing levels
-#        takes_value: true

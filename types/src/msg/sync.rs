@@ -1,7 +1,7 @@
 use avsss::r_ring::R;
 use serde::{Serialize, Deserialize};
 
-use crate::{WireReady, Replica, Val};
+use crate::{WireReady, Replica};
 
 #[derive(Debug,Serialize,Deserialize,Clone)]
 pub enum SyncState{

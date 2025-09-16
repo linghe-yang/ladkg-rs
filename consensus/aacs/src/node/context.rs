@@ -136,24 +136,16 @@ impl Context {
                     res_send,
 
                     terminated: false,
-
-
-                    // round_state: HashMap::default(),
-                    // invoke_coin:tokio_util::time::DelayQueue::new(),
-                    //echos_ss: HashMap::default(),
                     exit_rx,
                     cancel_handlers: HashMap::default(),
                 };
                 for (id, sk_data) in config.sk_map.clone() {
                     c.sec_key_map.insert(id, sk_data.clone());
                 }
-                //c.invoke_coin.insert(100, Duration::from_millis(sleep_time.try_into().unwrap()));
                 if let Err(e) = c.run().await {
-                    // log::error!("Consensus error: {}", e);
                     log::error!("ACS Consensus error:{}", e);
                 }
                 log::debug!("Started n-parallel RBC");
-                // Initialize storage
             });
             Ok(exit_tx)
         } else {
@@ -172,7 +164,7 @@ impl Context {
         while let Some((seq_num,coin)) = self.coin_recv.recv().await {
             if seq_num == 10 {
                 self.leaders = select_set(self.num_nodes,self.kappa,coin);
-                info!("leaders: {:?}", self.leaders);
+                info!("Node {}: Leaders selected by common coin: {:?}",self.myid, self.leaders);
                 break
             }
         }
@@ -181,7 +173,7 @@ impl Context {
             tokio::select! {
                 // Handle incoming transcripts
                 Some(transcript) = self.trans_recv.recv() => {
-                    info!("trans received to broadcast: {:?}", transcript);
+                    info!("Node {}: Transcript received from VSS", self.myid);
                     self.broadcast(ACSMsg::RBCTrans(transcript.clone(), self.myid)).await;
                 }
                 // Handle exit signal
@@ -209,8 +201,8 @@ impl Context {
         let msg = msg.protmsg;
         match msg {
             ACSMsg::RBCTrans(trans, sender) => {
+                info!("Node {}: Received Transcript from {}", self.myid, sender);
                 self.trans_buffer.insert(sender, trans);
-
                 // Leader-specific logic
                 if self.leaders.contains(&self.myid) && !self.indices_broadcasted {
                     if let Some(set) = find_t_transcripts(&self.trans_buffer, self.num_nodes - self.num_faults) {
@@ -235,6 +227,7 @@ impl Context {
                 if !self.leaders.contains(&sender) || indices.len() != (self.num_nodes - self.num_faults) || self.delphi_joined.contains(&sender) {
                     return Ok(());
                 }
+                info!("Node {}: Received Indices set from {}", self.myid, sender);
                 self.indices_buffer.insert(sender, indices.clone());
                 if self.all_trans_received(&indices) {
                     self.delphi_val_tx.send((sender, self.high_val)).await?;
@@ -275,6 +268,7 @@ impl Context {
                 .flat_map(|r| self.indices_buffer.get(r).unwrap().iter().copied())
                 .collect::<HashSet<Replica>>();
             self.final_set = final_set;
+            info!("Node {}: All Delphi instances terminated, final set decided.", self.myid);
             self.check_final_set().await;
         }
         Ok(())
@@ -286,6 +280,7 @@ impl Context {
             let result = self.final_set.iter()
                 .map(|r| self.trans_buffer.get(r).unwrap().clone())
                 .collect::<Vec<Transcript>>();
+            info!("Node {}: All Transcript in final set received, ACS result formed", self.myid);
             self.res_send.send(result).await.unwrap();
             self.terminated = true;
         }
@@ -294,10 +289,8 @@ impl Context {
         let sec_key_map = self.sec_key_map.clone();
         for (replica, sec_key) in sec_key_map.into_iter() {
             let wrapper_msg = ACSWrapperMsg::new(protmsg.clone(), self.myid, &sec_key.as_slice());
-            info!("msg to broadcast");
             let cancel_handler: CancelHandler<Acknowledgement> =
                 self.net_send.send(replica, wrapper_msg).await;
-            info!("broadcasted");
             self.add_cancel_handler(cancel_handler);
         }
     }
@@ -349,7 +342,7 @@ pub fn find_t_transcripts(
     if map.len() == t {
         let result = map
             .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
+            .map(|(k, v)| (*k, v.clone()))
             .collect::<Vec<(Replica, Transcript)>>();
         Some(result)
     } else {

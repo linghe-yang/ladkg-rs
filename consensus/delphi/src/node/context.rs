@@ -318,7 +318,7 @@ impl Delphi {
                     self.process_msg(msg).await;
                 },
                 cons = self.consensus_rx.recv() => {
-                    log::error!("Consensus Stop time (inst_id: {}): {:?}", inst_id, SystemTime::now()
+                    log::info!("Delphi Consensus Stop time (inst_id: {}): {:?}", inst_id, SystemTime::now()
                         .duration_since(UNIX_EPOCH)
                         .unwrap()
                         .as_millis());

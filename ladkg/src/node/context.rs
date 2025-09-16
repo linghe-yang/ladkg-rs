@@ -13,8 +13,8 @@ use fnv::FnvHashMap;
 use hashrand::node::HashRand;
 use hrconfig::Node as HashRandConfig;
 use hrcrypto::Algorithm as HashRandAlgorithm;
-use log::{error, info};
-use nalgebra::DVector;
+use log::{info};
+use nalgebra::{DVector};
 use network::Acknowledgement;
 use network::plaintcp::{CancelHandler, TcpReceiver, TcpReliableSender};
 use rand::SeedableRng;
@@ -199,12 +199,10 @@ impl Context {
                 for (id, sk_data) in config.sk_map.clone() {
                     c.sec_key_map.insert(id, sk_data.clone());
                 }
-                //c.invoke_coin.insert(100, Duration::from_millis(sleep_time.try_into().unwrap()));
                 if let Err(e) = c.run().await {
                     log::error!("DKG Consensus error:{}", e);
                 }
                 log::debug!("Started n-parallel RBC");
-                // Initialize storage
             });
 
 
@@ -248,10 +246,9 @@ impl Context {
                             self.sharing_phase().await?;
                         },
                         SyncState::STOP =>{
-                            log::error!("DKG Stop time: {:?}", SystemTime::now()
+                            info!("DKG Stop time: {:?}", SystemTime::now()
                                 .duration_since(UNIX_EPOCH)?
                                 .as_millis());
-                            info!("Termination signal received by the server. Exiting.");
                             break
                         },
                         _=>{}
@@ -267,6 +264,8 @@ impl Context {
     }
 
     pub async fn sharing_phase(&mut self) -> Result<(), anyhow::Error>{
+        self.coin_req.send(20).await?;
+        info!("Node {}: start sharing phase", self.myid);
         let mut rng = StdRng::from_rng(OsRng)?;
         let secret =
             DVector::from_iterator(X_LEN, (0..X_LEN).map(|_| R::random_gaussian(&mut rng, 1.0)));
@@ -284,7 +283,7 @@ impl Context {
         let pub_msg = VSSMsg::VSSPublicShare(pus, self.myid);
         self.broadcast(pub_msg).await;
 
-        self.coin_req.send(20).await?;
+        info!("Node {}: finish sharing phase", self.myid);
         Ok(())
     }
 
@@ -293,6 +292,7 @@ impl Context {
         let msg = msg.protmsg;
         match msg {
             VSSMsg::VSSPrivateShare(my_share, sender) => {
+                info!("Node {}: VSS private share received from: {}", self.myid, sender);
                 if !self.pub_shares.contains_key(&sender) {
                     self.unvalidated_shares.entry(sender).or_insert(my_share);
                 } else {
@@ -300,6 +300,7 @@ impl Context {
                 }
             }
             VSSMsg::VSSPublicShare(pub_share, sender) => {
+                info!("Node {}: VSS public share received from: {}", self.myid, sender);
                 if !self.verify_pub_share(&pub_share) {return Ok(())}
                 self.pub_shares.entry(sender).or_insert(pub_share.clone());
                 if self.unvalidated_shares.contains_key(&sender) {
@@ -309,6 +310,7 @@ impl Context {
                 }
             }
             VSSMsg::VSSReply(sig, sender) => {
+                info!("Node {}: VSS reply received from: {}", self.myid ,sender);
                 if self.transcripts.read().await.contains_key(&self.myid) {
                     return Ok(());
                 }
@@ -328,20 +330,25 @@ impl Context {
                 }
             }
             VSSMsg::DKGPubKey(pub_key, sender) => {
+                info!("Node {}: DKG PubKey share received from: {}", self.myid, sender);
                 if self.th_pk != R::default() {return Ok(())}
                 self.th_pk_shares.entry(sender).or_insert(*pub_key);
                 if self.th_pk_shares.len() >= (self.num_nodes - self.num_faults) {
+                    info!("Node {}: Start reconstructing threshold public key", self.myid);
                     let shares: Vec<(i32, R)> = self.th_pk_shares.clone()
                         .into_iter()
                         .map(|(k, v)| ((k+1) as i32, v))
                         .collect();
                     if let Some(b) = shamir_reconstruct_r(&shares, self.num_faults) {
+                        info!("Node {}: Threshold public key reconstructed: {:?}",self.myid, b);
                         self.th_pk = b;
                         let cancel_handler = self.sync_send.send(
                             0,
                             SyncMsg { sender: self.myid, state: SyncState::COMPLETED(Box::new(b))}).await;
                         self.add_cancel_handler(cancel_handler);
-                        info!("th_pubkey shares constructed: {:?}", b);
+
+                    }else {
+                        info!("Node {}: Failed to reconstruct public key", self.myid);
                     }
                 }
             }
@@ -350,6 +357,7 @@ impl Context {
     }
 
     async fn handle_acs_result(&mut self, res: Vec<Transcript>) -> Result<(), anyhow::Error> {
+        info!("Node {}: ACS output received", self.myid);
         let mut decided_trans = Vec::new();
         for trans in res.iter() {
             if trans.verify(&self.sig_pks, &self.pks, self.num_nodes) {
@@ -382,7 +390,7 @@ impl Context {
         let th_sk = self.sum_secret_key(&decided_trans).unwrap();
         self.th_sk = th_sk.clone();
 
-        info!("acs finished");
+        info!("Node {}: secret key formed: {:?}",self.myid, self.th_sk);
         if let Some((_,coin)) = self.coin_recv.recv().await {
             let mut rng = create_thread_safe_rng(coin);
             let a = R::random_gaussian(&mut rng, 1f64);
@@ -392,7 +400,7 @@ impl Context {
             self.th_pk_shares.entry(self.myid).or_insert(b_i);
             let msg = VSSMsg::DKGPubKey(Box::new(b_i), self.myid);
             self.broadcast(msg).await;
-            info!("my pk broadcast");
+            info!("Node {}: public key share broadcasted", self.myid);
         }
 
         Ok(())
@@ -410,7 +418,6 @@ impl Context {
         let b_prime = (Y_LEN as f64).sqrt() * (p1 + p2);
         let v_norm = euclidean_norm(&u);
         if v_norm > b_prime {
-            error!("u false");
             return false;
         }
         true
@@ -447,7 +454,6 @@ impl Context {
         }
 
         let pub_share = self.pub_shares.get(&sender).unwrap();
-        info!("my share from {} is valid", sender);
         let sig = Signature::new(&pub_share.merkle_root, &self.sig_sk);
         let msg = VSSMsg::VSSReply(sig, self.myid);
         self.p2p_send(msg, sender).await;
@@ -467,6 +473,7 @@ impl Context {
 
         tokio::spawn(async move {
             sleep(Duration::from_millis(delta)).await;
+            info!("Node {}: Start generating transcript", myid);
             let guard = certificate.read().await.clone();
             let cert: Vec<(Replica, Signature)> = guard.into_iter().collect();
             let supple_indices = find_missing_replicas(&cert, num_nodes);
@@ -490,8 +497,8 @@ impl Context {
                 supple_shares,
             };
 
+            info!("Node {}: Transcript generated", myid);
             transcripts.write().await.entry(myid).or_insert(trans.clone());
-            info!("my transcript has formed");
             trans_tx.send(trans).await.unwrap();
         });
     }

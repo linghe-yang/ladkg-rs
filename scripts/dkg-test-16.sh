@@ -5,7 +5,7 @@ rm -rf /tmp/*.db &> /dev/null
 tri=1000000
 
 rand=$(shuf -i 1000-150000000 -n 1)
-TESTDIR=${TESTDIR:="testdata/hyb_4"}
+TESTDIR=${TESTDIR:="testdata/hyb_16"}
 TYPE=${TYPE:="release"}
 EXP=${EXP:-"appxcox_new"}
 W=${W:="10000"}
@@ -22,7 +22,7 @@ echo $st_time
     --syncer $1 \
     --batch 10 \
     --rand $rand > logs/syncer.log &
-for((i=0;i<4;i++)); do
+for((i=0;i<16;i++)); do
 ./target/$TYPE/node \
     --config $TESTDIR/nodes-$i.json \
     --ip ip_file \

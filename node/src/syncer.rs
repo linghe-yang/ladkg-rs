@@ -97,6 +97,7 @@ impl Syncer{
                                     sender: self.num_nodes, 
                                     state: SyncState::StartVSS,
                                 }).await;
+                                log::info!("StartVSS message broadcast to all nodes");
                                 self.start_time = SystemTime::now()
                                 .duration_since(UNIX_EPOCH)
                                 .unwrap()
@@ -133,6 +134,7 @@ impl Syncer{
 
 
                                 self.broadcast(SyncMsg { sender: self.num_nodes, state: SyncState::STOP}).await;
+                                log::info!("STOP message broadcast to all nodes");
                             }
                         }
                         _=>{}

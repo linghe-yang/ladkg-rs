@@ -57,7 +57,7 @@ impl Delphi {
             self.process_baa_echo2( msg, self.myid, round).await;
         }
         if terminated {
-            log::info!("Terminated round {}, starting round {} at inst: {}",round,round+1, self.del_inst_id);
+            log::debug!("Terminated round {}, starting round {} at inst: {}",round,round+1, self.del_inst_id);
             self.start_baa(round+1).await;
             return;
         }
@@ -97,7 +97,7 @@ impl Delphi {
             terminated = terminated && level_state.1.terminated_round(round);
         }
         if terminated {
-            log::info!("Terminated round {}, starting round {} at inst: {}",round,round+1, self.del_inst_id);
+            log::debug!("Terminated round {}, starting round {} at inst: {}",round,round+1, self.del_inst_id);
             self.start_baa(round+1).await;
             return;
         }

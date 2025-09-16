@@ -21,7 +21,6 @@ async fn main() -> Result<()> {
     log::error!("{}", std::env::current_dir().unwrap().display());
     let yaml = load_yaml!("cli.yml");
     let m = App::from_yaml(yaml).get_matches();
-    //println!("{:?}",m);
     let conf_str = m.value_of("config")
         .expect("unable to convert config file into a string");
     let vss_type = m.value_of("vsstype")
@@ -30,9 +29,9 @@ async fn main() -> Result<()> {
         .expect("Unable to detect sleep time").parse::<u128>().unwrap();
     let _batch = m.value_of("batch")
         .expect("Unable to parse batch size").parse::<usize>().unwrap();
-    let val_appx = m.value_of("val")
-        .expect("Value required");
-    let val_appx = parse_val_string(val_appx).unwrap();
+    // let val_appx = m.value_of("val")
+    //     .expect("Value required");
+    // let val_appx = parse_val_string(val_appx).unwrap();
     let syncer_file = m.value_of("syncer")
         .expect("Unable to parse syncer ip file");
     let _rand = m.value_of("rand")
@@ -70,28 +69,28 @@ async fn main() -> Result<()> {
     // }
     // let config = config;
     // Start the Reliable Broadcast protocol
-    let exit_tx_vec ;
+    // let exit_tx_vec ;
     let exit_tx_dkg;
     let exit_tx_acs;
     let sync_exit_tx;
 
 
     match vss_type{
-        "del" =>{
-            let (val_tx, val_rx) = channel(160);
-
-            let (res_tx, mut res_rx) = channel(160);
-            exit_tx_vec = delphi::node::Delphi::spawn(config, val_rx, Arc::new(res_tx))?;
-
-            for (i,value) in val_appx.iter().enumerate() {
-                let inst_id = i;
-                val_tx.send((inst_id, *value)).await?;
-            }
-
-            while let Some((inst_id,value)) = res_rx.recv().await {
-                log::info!("Delphi inst: {} has terminated with value: {}", inst_id, value);
-            }
-        },
+        // "del" =>{
+        //     let (val_tx, val_rx) = channel(160);
+        //
+        //     let (res_tx, mut res_rx) = channel(160);
+        //     exit_tx_vec = delphi::node::Delphi::spawn(config, val_rx, Arc::new(res_tx))?;
+        //
+        //     for (i,value) in val_appx.iter().enumerate() {
+        //         let inst_id = i;
+        //         val_tx.send((inst_id, *value)).await?;
+        //     }
+        //
+        //     while let Some((inst_id,value)) = res_rx.recv().await {
+        //         log::info!("Delphi inst: {} has terminated with value: {}", inst_id, value);
+        //     }
+        // },
 
         "acs" =>{
             let trans = Transcript::default();
