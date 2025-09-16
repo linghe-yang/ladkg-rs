@@ -9,11 +9,7 @@ members = [
     "consensus",
     # "comm", (WIP: Do not enable unless testing)
     # RBC module
-    "consensus/appxcon",
     "consensus/aacs",
     "consensus/delphi",
-    "consensus/delphi-rbc",
-    "consensus/fin",
-    "consensus/hyb_appxcon",
     "node", "ladkg",
 ]

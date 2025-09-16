@@ -20,15 +20,15 @@ sleep=1
 st_time=$((curr_date+sleep))
 echo $st_time
 # Run the syncer now
-#./target/$TYPE/node \
-#    --config $TESTDIR/nodes-0.json \
-#    --ip ip_file \
-#    --sleep $st_time \
-#    --vsstype sync \
-#    --val "100,100,100,100" \
-#    --syncer $1 \
-#    --batch 10 \
-#    --rand $rand > logs/syncer.log &
+./target/$TYPE/node \
+    --config $TESTDIR/nodes-0.json \
+    --ip ip_file \
+    --sleep $st_time \
+    --vsstype sync \
+    --val "100,100,100,100" \
+    --syncer $1 \
+    --batch 10 \
+    --rand $rand > logs/syncer.log &
 for((i=0;i<4;i++)); do
 ./target/$TYPE/node \
     --config $TESTDIR/nodes-$i.json \

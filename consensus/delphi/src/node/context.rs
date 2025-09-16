@@ -1,4 +1,4 @@
-use super::{Handler, Level, SyncHandler};
+use super::{Handler, Level};
 use anyhow::{anyhow, Result};
 use config::Node;
 use fnv::FnvHashMap;
@@ -14,14 +14,13 @@ use std::{
 };
 use tokio::sync::mpsc::{Receiver, Sender, UnboundedSender};
 use tokio::sync::{
-    broadcast,
     mpsc::{unbounded_channel, UnboundedReceiver},
     oneshot,
 };
 use tokio::sync::{mpsc, Mutex};
 use types::{
     appxcon::{ProtMsg, Replica, WrapperMsg},
-    Lev, Round, SyncMsg, SyncState, Val,
+    Lev, Round, Val,
 };
 /**
  * This context contains necessary state variables for executing Delphi
@@ -297,7 +296,7 @@ impl Delphi {
                 .unwrap()
                 .as_millis()
         );
-        self.start_baa(0 as Round, inst_id).await;
+        self.start_baa(0 as Round).await;
         // let cancel_handler = self.sync_send.lock().await.send(0, SyncMsg {
         //     sender: self.myid,
         //     state: SyncState::STARTED,

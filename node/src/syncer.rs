@@ -1,47 +1,44 @@
-use std::{collections::{HashSet, HashMap}, net::{SocketAddr,SocketAddrV4}, time::{SystemTime, UNIX_EPOCH, Duration}};
-
+use std::{collections::{HashSet, HashMap}, net::{SocketAddr}, time::{SystemTime, UNIX_EPOCH, Duration}};
+use std::net::SocketAddrV4;
 use anyhow::{Result, anyhow};
-use super::sync_handler::SyncHandler;
+use avsss::r_ring::R;
 use fnv::FnvHashMap;
-use network::{plaintcp::{TcpReceiver, TcpReliableSender, CancelHandler}, Acknowledgement};
-use tokio::sync::{oneshot, mpsc::{unbounded_channel, UnboundedReceiver}};
+use network::{plaintcp::{TcpReliableSender, CancelHandler}, Acknowledgement};
+use network::plaintcp::TcpReceiver;
+use tokio::sync::{oneshot, mpsc::{UnboundedReceiver}};
+use tokio::sync::mpsc::unbounded_channel;
 use types::{Replica, SyncMsg, SyncState};
+use crate::sync_handler::SyncHandler;
 
 pub struct Syncer{
     pub num_nodes: usize,
     pub start_time: u128,
-    pub sharing_complete_times: HashMap<Replica,u128>,
-    pub recon_start_time: u128,
     pub net_map: FnvHashMap<Replica,String>,
     pub alive: HashSet<Replica>,
     pub timings:HashMap<Replica,u128>,
-    pub values: HashMap<Replica,u64>,
+    pub th_pks: HashMap<Replica,R>,
     pub cli_addr: SocketAddr,
     pub rx_net: UnboundedReceiver<SyncMsg>,
     pub net_send: TcpReliableSender<Replica,SyncMsg,Acknowledgement>,
     exit_rx: oneshot::Receiver<()>,
     /// Cancel Handlers
     pub cancel_handlers: Vec<CancelHandler<Acknowledgement>>,
-    pub del_inst_id: usize,
 }
 
 impl Syncer{
     pub fn spawn(
         net_map: FnvHashMap<Replica,String>,
         cli_addr:SocketAddr,
-        rx_net_to_server: UnboundedReceiver<SyncMsg>,
-        inst_id: usize,
-    )-> anyhow::Result<oneshot::Sender<()>>{
+    )-> Result<oneshot::Sender<()>>{
         let (exit_tx, exit_rx) = oneshot::channel();
-        // let (tx_net_to_server, rx_net_to_server) = unbounded_channel();
-        // let cli_addr_sock = cli_addr.port();
-        // let new_sock_address = SocketAddrV4::new("0.0.0.0".parse().unwrap(), cli_addr_sock);
-        // TcpReceiver::<Acknowledgement, SyncMsg, _>::spawn(
-        //     std::net::SocketAddr::V4(new_sock_address),
-        //     SyncHandler::new(tx_net_to_server),
-        // );
+        let (tx_net_to_server, rx_net_to_server) = unbounded_channel();
+        let cli_addr_sock = cli_addr.port();
+        let new_sock_address = SocketAddrV4::new("0.0.0.0".parse()?, cli_addr_sock);
+        TcpReceiver::<Acknowledgement, SyncMsg, _>::spawn(
+            SocketAddr::V4(new_sock_address),
+            SyncHandler::new(tx_net_to_server),
+        );
         let mut server_addrs :FnvHashMap<Replica,SocketAddr>= FnvHashMap::default();
-        println!("{:?}",net_map);
         for (replica,address) in net_map.iter(){
             let address:SocketAddr = address.parse().expect("Unable to parse address");
             server_addrs.insert(*replica, SocketAddr::from(address.clone()));
@@ -51,18 +48,15 @@ impl Syncer{
             let mut syncer = Syncer{
                 net_map:net_map.clone(),
                 start_time:0,
-                sharing_complete_times:HashMap::default(),
-                recon_start_time:0,
                 num_nodes:net_map.len(),
                 alive:HashSet::default(),
-                values:HashMap::default(),
+                th_pks:HashMap::default(),
                 timings:HashMap::default(),
-                cli_addr:cli_addr,
+                cli_addr,
                 rx_net:rx_net_to_server,
-                net_send:net_send,
-                exit_rx:exit_rx,
+                net_send,
+                exit_rx,
                 cancel_handlers:Vec::new(),
-                del_inst_id: inst_id,
             };
             if let Err(e) = syncer.run().await {
                 log::error!("Consensus error: {}", e);
@@ -101,9 +95,7 @@ impl Syncer{
                                 std::thread::sleep(Duration::from_secs(3));
                                 self.broadcast(SyncMsg { 
                                     sender: self.num_nodes, 
-                                    state: SyncState::START,
-                                    value:0,
-                                    inst_id: self.del_inst_id,
+                                    state: SyncState::StartVSS,
                                 }).await;
                                 self.start_time = SystemTime::now()
                                 .duration_since(UNIX_EPOCH)
@@ -111,54 +103,13 @@ impl Syncer{
                                 .as_millis();
                             }
                         },
-                        SyncState::STARTED=>{
-                            log::info!("Node {} started the protocol",msg.sender);
-                        },
-                        SyncState::CompletedSharing=>{
-                            log::info!("Node {} completed the sharing phase of the protocol",msg.sender);
-                            self.sharing_complete_times.insert(msg.sender, SystemTime::now().duration_since(UNIX_EPOCH)
-                            .unwrap()
-                            .as_millis());
-                            self.values.insert(msg.sender,msg.value as u64);
-                            if self.sharing_complete_times.len() == (2*self.num_nodes/3)+1{
-                                // All nodes terminated sharing protocol
-                                let mut vec_times = Vec::new();
-                                for (_rep,time) in self.sharing_complete_times.iter(){
-                                    vec_times.push(time.clone()-self.start_time);
-                                }
-                                vec_times.sort();
-                                log::info!("All n nodes completed the sharing protocol {:?} {:?}",vec_times,self.values);
-                                self.start_time = SystemTime::now()
-                                .duration_since(UNIX_EPOCH)
-                                .unwrap()
-                                .as_millis(); 
-                                self.broadcast(SyncMsg { sender: self.num_nodes, state: SyncState::StartRecon, value:0, inst_id: self.del_inst_id }).await;
-                            }
-                        },
-                        SyncState::CompletedRecon=>{
-                            log::info!("Node {} completed the reconstruction phase of the protocol",msg.sender);
-                            self.timings.insert(msg.sender, SystemTime::now()
-                            .duration_since(UNIX_EPOCH)
-                            .unwrap()
-                            .as_millis());
-                            if self.timings.len() == self.num_nodes{
-                                // All nodes terminated protocol
-                                let mut vec_times = Vec::new();
-                                for (_rep,time) in self.timings.iter(){
-                                    vec_times.push(time.clone()-self.start_time);
-                                }
-                                vec_times.sort();
-                                log::info!("All n nodes completed the recon protocol {:?} {:?}",vec_times,self.values);
-                                self.broadcast(SyncMsg { sender: self.num_nodes, state: SyncState::STOP, value:0, inst_id: self.del_inst_id}).await;
-                            }
-                        },
-                        SyncState::COMPLETED=>{
+                        SyncState::COMPLETED(pub_key)=>{
                             log::info!("Got COMPLETED message from node {}",msg.sender);
                             self.timings.insert(msg.sender, SystemTime::now()
                             .duration_since(UNIX_EPOCH)
                             .unwrap()
                             .as_millis());
-                            self.values.insert(msg.sender,msg.value as u64);
+                            self.th_pks.insert(msg.sender,*pub_key.clone());
                             if self.timings.len() == self.num_nodes{
                                 // All nodes terminated protocol
                                 let mut vec_times = Vec::new();
@@ -166,8 +117,22 @@ impl Syncer{
                                     vec_times.push(time.clone()-self.start_time);
                                 }
                                 vec_times.sort();
-                                log::info!("All n nodes completed the protocol {:?} with values {:?}",vec_times,self.values);
-                                self.broadcast(SyncMsg { sender: self.num_nodes, state: SyncState::STOP, value:0, inst_id: self.del_inst_id}).await;
+                                let r0 = self.th_pks.get(&msg.sender).unwrap();
+                                let mut flag_pk_consistent = true;
+                                for (_,pk) in self.th_pks.iter() {
+                                    if r0 != pk {
+                                        flag_pk_consistent = false;
+                                        log::info!("Inconsistent pk detected");
+                                        break;
+                                    }
+
+                                }
+                                if flag_pk_consistent {
+                                    log::info!("All n nodes completed the protocol {:?} with threshold pk: {:?}",vec_times,r0);
+                                }
+
+
+                                self.broadcast(SyncMsg { sender: self.num_nodes, state: SyncState::STOP}).await;
                             }
                         }
                         _=>{}

@@ -13,7 +13,7 @@ use std::collections::{HashMap, HashSet};
 use std::net::{SocketAddr, SocketAddrV4};
 use std::sync::Arc;
 use tokio::sync::mpsc::{Receiver, Sender, UnboundedReceiver, unbounded_channel, channel};
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::{oneshot};
 use types::dkg::msg::{ACSMsg, ACSWrapperMsg};
 use types::{Replica, Round, Val};
 use types::dkg::trans::Transcript;

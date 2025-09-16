@@ -1,19 +1,18 @@
 // A tool that builds config files for all the nodes and the clients for the
 // protocol.
 
-use crypto::{ed25519, secp256k1::{self,SecretKey}};
-use config::{Node, Client, DelphiParams, ACSParams, DKGParams, DRBParams};
-use clap::{load_yaml, App};
-use rand::Rng;
-use types::{Replica, Val};
-use crypto::Algorithm;
-use std::{error::Error, io::{BufWriter, Write}, fs::File};
 use avsss::{PublicKey, VE};
-use util::io::*;
-use fnv::FnvHashMap as HashMap;
+use clap::{load_yaml, App};
+use config::{ACSParams, Client, DKGParams, DRBParams, DelphiParams, Node};
 use crypto::dilithum_sig::generate_keypair;
 use crypto::dilithum_sig::PublicKey as DilithiumPublicKey;
-use crypto::dilithum_sig::SecretKey as DilithiumSecretKey;
+use crypto::Algorithm;
+use crypto::{ed25519, secp256k1::{self, SecretKey}};
+use fnv::FnvHashMap as HashMap;
+use rand::Rng;
+use std::{error::Error, fs::File, io::{BufWriter, Write}};
+use types::{Replica, Val};
+use util::io::*;
 // fn new_root_cert() -> Result<(X509, PKey<Private>), ErrorStack> {
 //     let rsa = Rsa::generate(2048)?;
 //     let privkey = PKey::from_rsa(rsa)?;
@@ -213,7 +212,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .unwrap_or("false")
         .parse()
         .unwrap();
-    let c_rport:u16 = m.value_of("client_run_port")
+    let _c_rport:u16 = m.value_of("client_run_port")
         .expect("Client port expected")
         .parse::<u16>()
         .expect("unable to parse client's port into an integer");

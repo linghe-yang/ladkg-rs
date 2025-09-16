@@ -1,4 +1,4 @@
-use types::{Replica, SyncMsg, SyncState, appxcon::{ProtMsg, DelphiMsg}, Round, Val, Point, Lev};
+use types::{Replica, appxcon::{ProtMsg, DelphiMsg}, Round, Val, Point, Lev};
 
 use crate::node::{Delphi};
 
@@ -58,7 +58,7 @@ impl Delphi {
         }
         if terminated {
             log::info!("Terminated round {}, starting round {} at inst: {}",round,round+1, self.del_inst_id);
-            self.start_baa(round+1,self.del_inst_id).await;
+            self.start_baa(round+1).await;
             return;
         }
     }
@@ -98,7 +98,7 @@ impl Delphi {
         }
         if terminated {
             log::info!("Terminated round {}, starting round {} at inst: {}",round,round+1, self.del_inst_id);
-            self.start_baa(round+1, self.del_inst_id).await;
+            self.start_baa(round+1).await;
             return;
         }
     }
@@ -108,7 +108,7 @@ impl Delphi {
      * We start a new round r only after all approximate agreement instances representing all checkpoints at all levels terminate round r-1.
      */
     #[async_recursion::async_recursion]
-    pub async fn start_baa(self: &mut Delphi, round:Round, inst_id: usize){
+    pub async fn start_baa(self: &mut Delphi, round:Round){
         self.round = round;
         // If maximum number of rounds are run, terminate protocol by sending a Completed message to the syncer.
         if self.round > self.total_rounds_bin{

@@ -22,19 +22,22 @@ use rand::rngs::{OsRng, StdRng};
 use std::collections::{HashMap, HashSet};
 use std::net::{SocketAddr, SocketAddrV4};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use avsss::shamir_r::shamir_reconstruct_r;
 use tokio::sync::mpsc::{Receiver, Sender, UnboundedReceiver, channel, unbounded_channel};
-use tokio::sync::{mpsc, oneshot, watch, Mutex, RwLock};
+use tokio::sync::{mpsc, oneshot, RwLock};
 use tokio::time::sleep;
 use types::dkg::msg::{VSSMsg, VSSWrapperMsg};
 use types::dkg::trans::Transcript;
-use types::{Replica, Round};
-
+use types::{Replica, Round, SyncMsg, SyncState};
+use crate::node::sync_handler::SyncHandler;
 
 pub struct Context {
     pub net_send: TcpReliableSender<Replica, VSSWrapperMsg, Acknowledgement>,
     pub net_recv: UnboundedReceiver<VSSWrapperMsg>,
+    pub sync_send:TcpReliableSender<Replica,SyncMsg,Acknowledgement>,
+    pub sync_recv: UnboundedReceiver<SyncMsg>,
+
     pub myid: usize,
     pub sec_key_map: HashMap<Replica, Vec<u8>>,
     pub num_nodes: usize,
@@ -89,6 +92,19 @@ impl Context {
         }
         let my_port = consensus_addrs.get(&config.id).unwrap();
         let my_address = to_socket_address("0.0.0.0", my_port.port());
+
+
+        let mut syncer_map:FnvHashMap<Replica,SocketAddr> = FnvHashMap::default();
+        syncer_map.insert(0, config.client_addr);
+        let syncer_listen_port = config.client_port;
+        let syncer_l_address = to_socket_address("0.0.0.0", syncer_listen_port);
+        let (tx_net_to_client,rx_net_from_client) = unbounded_channel();
+        TcpReceiver::<Acknowledgement,SyncMsg,_>::spawn(
+            syncer_l_address,
+            SyncHandler::new(tx_net_to_client)
+        );
+        let sync_net = TcpReliableSender::<Replica,SyncMsg,Acknowledgement>::with_peers(syncer_map);
+
         let (tx_net_to_consensus, rx_net_to_consensus) = unbounded_channel();
         TcpReceiver::<Acknowledgement, VSSWrapperMsg, _>::spawn(
             my_address,
@@ -144,6 +160,8 @@ impl Context {
                 let mut c = Context {
                     net_send: consensus_net,
                     net_recv: rx_net_to_consensus,
+                    sync_send: sync_net,
+                    sync_recv: rx_net_from_client,
                     num_nodes: config.num_nodes,
                     trans_waiting_time: config.dkg.trans_waiting_time,
                     sec_key_map: HashMap::default(),
@@ -200,6 +218,55 @@ impl Context {
     }
 
     pub async fn run(&mut self) -> Result<(), anyhow::Error> {
+        let cancel_handler = self.sync_send.send(
+            0,
+            SyncMsg { sender: self.myid, state: SyncState::ALIVE}).await;
+        self.add_cancel_handler(cancel_handler);
+
+        loop {
+            tokio::select! {
+                // Handle exit signal
+                result = &mut self.exit_rx => {
+                    result.map_err(|_| anyhow!("Exit channel closed"))?;
+                    info!("Termination signal received. Exiting.");
+                    break;
+                }
+                // Handle network messages
+                Some(msg) = self.net_recv.recv() => {
+                    self.handle_network_message(msg).await?;
+                }
+
+                sync_msg = self.sync_recv.recv() =>{
+                    let sync_msg = sync_msg.ok_or_else(||
+                        anyhow!("Networking layer has closed")
+                    )?;
+                    match sync_msg.state {
+                        SyncState::StartVSS =>{
+                            info!("DKG Start time: {:?}", SystemTime::now()
+                                .duration_since(UNIX_EPOCH)?
+                                .as_millis());
+                            self.sharing_phase().await?;
+                        },
+                        SyncState::STOP =>{
+                            log::error!("DKG Stop time: {:?}", SystemTime::now()
+                                .duration_since(UNIX_EPOCH)?
+                                .as_millis());
+                            info!("Termination signal received by the server. Exiting.");
+                            break
+                        },
+                        _=>{}
+                    }
+                }
+
+                Some(res) = self.acs_res_rx.recv() => {
+                    self.handle_acs_result(res).await?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn sharing_phase(&mut self) -> Result<(), anyhow::Error>{
         let mut rng = StdRng::from_rng(OsRng)?;
         let secret =
             DVector::from_iterator(X_LEN, (0..X_LEN).map(|_| R::random_gaussian(&mut rng, 1.0)));
@@ -218,25 +285,6 @@ impl Context {
         self.broadcast(pub_msg).await;
 
         self.coin_req.send(20).await?;
-
-        loop {
-            tokio::select! {
-                // Handle exit signal
-                result = &mut self.exit_rx => {
-                    result.map_err(|_| anyhow!("Exit channel closed"))?;
-                    info!("Termination signal received. Exiting.");
-                    break;
-                }
-                // Handle network messages
-                Some(msg) = self.net_recv.recv() => {
-                    self.handle_network_message(msg).await?;
-                }
-
-                Some(res) = self.acs_res_rx.recv() => {
-                    self.handle_acs_result(res).await?;
-                }
-            }
-        }
         Ok(())
     }
 
@@ -289,6 +337,10 @@ impl Context {
                         .collect();
                     if let Some(b) = shamir_reconstruct_r(&shares, self.num_faults) {
                         self.th_pk = b;
+                        let cancel_handler = self.sync_send.send(
+                            0,
+                            SyncMsg { sender: self.myid, state: SyncState::COMPLETED(Box::new(b))}).await;
+                        self.add_cancel_handler(cancel_handler);
                         info!("th_pubkey shares constructed: {:?}", b);
                     }
                 }
@@ -475,7 +527,7 @@ impl Context {
 
     pub async fn p2p_send(&mut self, protmsg: VSSMsg, target: Replica) {
         let sec_key_map = self.sec_key_map.clone();
-        let sec_key = sec_key_map.iter().find(|(r, s)| **r == target).unwrap();
+        let sec_key = sec_key_map.iter().find(|(r, _s)| **r == target).unwrap();
         let wrapper_msg = VSSWrapperMsg::new(protmsg.clone(), self.myid, sec_key.1.as_slice());
         let cancel_handler: CancelHandler<Acknowledgement> =
             self.net_send.send(target, wrapper_msg).await;

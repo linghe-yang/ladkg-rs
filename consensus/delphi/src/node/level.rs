@@ -189,7 +189,7 @@ impl Level{
         if interval_vals.len() > 1{
             let num = interval_vals.len();
             let last_val = interval_vals[num-1];
-            let mut last_but_one = interval_vals.get_mut(num-2).unwrap();
+            let last_but_one = interval_vals.get_mut(num-2).unwrap();
             log::debug!("Compress fn: Last interval: {:?}, last_but_one: {:?} in level {}",last_val,last_but_one,lev);
             if last_but_one.2 == last_val.2 && last_but_one.1 == last_val.0{
                 last_but_one.1 = last_val.1;

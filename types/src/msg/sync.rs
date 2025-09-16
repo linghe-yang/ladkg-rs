@@ -1,3 +1,4 @@
+use avsss::r_ring::R;
 use serde::{Serialize, Deserialize};
 
 use crate::{WireReady, Replica, Val};
@@ -5,22 +6,15 @@ use crate::{WireReady, Replica, Val};
 #[derive(Debug,Serialize,Deserialize,Clone)]
 pub enum SyncState{
     ALIVE,
-    START,
-    StartRecon,
-    STARTED,
-    CompletedSharing,
-    COMPLETED,
-    CompletedRecon,
-    STOP,
-    STOPPED
+    StartVSS,
+    COMPLETED(Box<R>),
+    STOP
 }
 
 #[derive(Debug,Serialize,Deserialize,Clone)]
 pub struct SyncMsg{
     pub sender:Replica,
     pub state:SyncState,
-    pub value: Val,
-    pub inst_id: usize
 }
 
 impl WireReady for SyncMsg{
@@ -30,14 +24,14 @@ impl WireReady for SyncMsg{
         c.init()
     }
 
-    fn to_bytes(&self) -> Vec<u8> {
-        let bytes = bincode::serialize(self).expect("Failed to serialize client message");
-        bytes
-    }
-
     fn init(self) -> Self {
         match self {
             _x=>_x
         }
+    }
+
+    fn to_bytes(&self) -> Vec<u8> {
+        let bytes = bincode::serialize(self).expect("Failed to serialize client message");
+        bytes
     }
 }

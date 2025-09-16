@@ -1,12 +1,9 @@
-use std::collections::HashSet;
 use crate::Replica;
 use avsss::components::{verify, PublicShare, SuppleShare};
-use avsss::r_ring::R;
 use avsss::PublicKey as VEPublicKey;
 use crypto::dilithum_sig::{PublicKey as DilithiumPublicKey, Signature};
-use crypto::hash::Hash;
-use nalgebra::DVector;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct Transcript {

@@ -1,35 +1,20 @@
-use anyhow::{Result,anyhow};
+#![allow(warnings)]
+
+use anyhow::{Result};
 use clap::{
     load_yaml, 
     App
 };
 use config::Node;
-use fnv::FnvHashMap;
-use node::Syncer;
 use signal_hook::{iterator::Signals, consts::{SIGINT, SIGTERM}};
-use types::{Replica, SyncMsg, Val};
+use types::{Val};
 use std::{net::{SocketAddr, SocketAddrV4}};
-use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::thread::{sleep, sleep_ms};
-use std::time::Duration;
-use futures::channel::mpsc::Sender;
-use network::Acknowledgement;
-use network::plaintcp::TcpReceiver;
-use rand::prelude::SliceRandom;
-use tokio::sync::mpsc::{channel, unbounded_channel, UnboundedReceiver, UnboundedSender};
-use node::sync_handler::SyncHandler;
-use types::appxcon::WrapperMsg;
-use rand::rngs::StdRng;
-use rand::SeedableRng;
+use fnv::FnvHashMap;
+use tokio::sync::mpsc::{channel};
+use node::Syncer;
 use types::dkg::trans::Transcript;
 
-use hashrand::node::HashRand;
-use hrconfig::Node as HashRandConfig;
-use hrcrypto::{Algorithm as HashRandAlgorithm};
-use log::info;
-use tokio::sync::oneshot;
-use crypto::Algorithm;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -41,29 +26,20 @@ async fn main() -> Result<()> {
         .expect("unable to convert config file into a string");
     let vss_type = m.value_of("vsstype")
         .expect("Unable to detect VSS type");
-    let sleep = m.value_of("sleep")
+    let _sleep = m.value_of("sleep")
         .expect("Unable to detect sleep time").parse::<u128>().unwrap();
     let _batch = m.value_of("batch")
         .expect("Unable to parse batch size").parse::<usize>().unwrap();
     let val_appx = m.value_of("val")
         .expect("Value required");
-    let mut val_appx = parse_val_string(val_appx).unwrap();
-    
-    // let delta = m.value_of("delta")
-    //     .expect("Value required").parse::<Val>().unwrap();
-    // let epsilon = m.value_of("epsilon")
-    //     .expect("Value required").parse::<Val>().unwrap();
-    // let tri = m.value_of("tri")
-    //     .expect("Value required").parse::<Val>().unwrap();
+    let val_appx = parse_val_string(val_appx).unwrap();
     let syncer_file = m.value_of("syncer")
         .expect("Unable to parse syncer ip file");
-    let rand = m.value_of("rand")
+    let _rand = m.value_of("rand")
         .expect("Unable to parse random number").parse::<usize>().unwrap();
-    // let expo = m.value_of("expo")
-    //     .expect("Unable to parse exponent").parse::<f32>().unwrap();
     let conf_file = std::path::Path::new(conf_str);
     let str = String::from(conf_str);
-    let mut config = match conf_file
+    let config = match conf_file
         .extension()
         .expect("Unable to get file extension")
         .to_str()
@@ -94,27 +70,13 @@ async fn main() -> Result<()> {
     // }
     // let config = config;
     // Start the Reliable Broadcast protocol
-    let mut exit_tx_vec ;
-    let mut exit_tx_dkg;
-    let mut exit_tx_acs;
+    let exit_tx_vec ;
+    let exit_tx_dkg;
+    let exit_tx_acs;
+    let sync_exit_tx;
 
 
     match vss_type{
-        // "ped" =>{
-        //     //exit_tx = pedavss_cc::node::Context::spawn(config,sleep).unwrap();
-        // },
-        // "fre" => {
-        //     //exit_tx = hash_cc::node::Context::spawn(config,sleep).unwrap();
-        // },
-        // "hr" => {
-        //     //exit_tx = hash_cc_baa::node::Context::spawn(config,sleep,batch).unwrap();
-        // },
-        // "appx" => {
-        //     exit_tx = appxcon::node::Context::spawn(config, sleep, val_appx as u64,epsilon as u64).unwrap();
-        // },
-        // "hyb" =>{
-        //     exit_tx = hyb_appxcon::node::Context::spawn(config,sleep,val_appx as u64,delta as u64,epsilon as u64,tri as u64).unwrap();
-        // },
         "del" =>{
             let (val_tx, val_rx) = channel(160);
 
@@ -177,82 +139,19 @@ async fn main() -> Result<()> {
         //     }
         // }
 
-
-        // "delrbc" =>{
-        //     exit_tx = delphi_rbc::node::Context::spawn(config,val_appx,epsilon,delta,tri,expo).unwrap();
-        // },
-        // "fin" =>{
-        //     let rand = rand.to_string();
-        //     let mut arr_strsplit:Vec<&str> = conf_str.split("/").collect();
-        //     let id_str = ((config.id +1)).to_string();
-        //     //let id_str_1  = ((config.id)).to_string();
-        //     let key_str = "sec".to_string();
-        //     
-        //     let concat_str = key_str + &id_str;
-        //     let _last_elem = arr_strsplit.pop();
-        // 
-        //     let mut vec_native = Vec::new();
-        //     for i in 1..config.num_nodes+1{
-        //         let pkey_str = "pub".to_string();
-        //         let mut tpub = arr_strsplit.clone();
-        //         let iter_str = pkey_str.clone()+ &(i.to_string());
-        //         tpub.push(iter_str.as_str());
-        //         vec_native.push(tpub.join("/"));
-        //     }
-        //     arr_strsplit.push(concat_str.as_str());
-        //     println!("{:?} {:?}", arr_strsplit.join("/").as_str(), vec_native);
-        //     exit_tx = fin::node::Context::spawn(
-        //         config, 
-        //         arr_strsplit.join("/").as_str(),
-        //         vec_native,
-        //         val_appx,
-        //         rand
-        //     ).unwrap();
-        // },
-        // "sync" => {
-        //     let f_str = syncer_file.to_string();
-        //     log::info!("Logging the file f {}",f_str);
-        //     let ip_str = util::io::file_to_ips(f_str);
-        //     let mut net_map = FnvHashMap::default();
-        //     let mut idx = 0;
-        //     for ip in ip_str{
-        //         net_map.insert(idx, ip.clone());
-        //         idx += 1;
-        //     }
-        //
-        //     let n = config.num_nodes;
-        //     let kappa = 2;
-        //     let reps = select_set(n,kappa,20);
-        //
-        //     let mut sync_senders: HashMap<usize, UnboundedSender<SyncMsg>> = HashMap::new();
-        //     let mut sync_receivers: HashMap<usize, UnboundedReceiver<SyncMsg>> = HashMap::new();
-        //     for inst_id in reps.iter() {
-        //         let (sync_tx, sync_rx) = unbounded_channel::<SyncMsg>();
-        //         sync_senders.insert(*inst_id, sync_tx);
-        //         sync_receivers.insert(*inst_id, sync_rx);
-        //     }
-        //
-        //
-        //     let new_sock_address = SocketAddrV4::new("0.0.0.0".parse().unwrap(), config.client_addr.clone().port());
-        //     TcpReceiver::<Acknowledgement, SyncMsg, _>::spawn(
-        //         std::net::SocketAddr::V4(new_sock_address),
-        //         SyncHandler::new(sync_senders),
-        //     );
-        //
-        //     for inst_id in reps.iter() {
-        //         let rx_net_to_server = sync_receivers.remove(&inst_id).unwrap();
-        //         let tx = Syncer::spawn(net_map.clone(), config.client_addr.clone(), rx_net_to_server, *inst_id).unwrap();
-        //         exit_tx_vec.push(tx);
-        //     }
-        //
-        //     // let tx = Syncer::spawn(net_map, config.client_addr.clone() ,0).unwrap();
-        //     // exit_tx.push(tx);
-        //     //let client_addr = net_map.get(&(net_map.len()-1)).unwrap();
-        //     // for (id,mut tx) in exit_tx.iter().enumerate(){
-        //     //     tx = &Syncer::spawn(net_map.clone(), config.client_addr.clone(), id + 1).unwrap();
-        //     // }
-        //     // exit_tx = Syncer::spawn(net_map, config.client_addr.clone()).unwrap();
-        // },
+        "sync" => {
+            let f_str = syncer_file.to_string();
+            log::info!("Logging the file f {}",f_str);
+            let ip_str = util::io::file_to_ips(f_str);
+            let mut net_map = FnvHashMap::default();
+            let mut idx = 0;
+            for ip in ip_str{
+                net_map.insert(idx, ip.clone());
+                idx += 1;
+            }
+            //let client_addr = net_map.get(&(net_map.len()-1)).unwrap();
+            sync_exit_tx = Syncer::spawn(net_map, config.client_addr.clone())?;
+        },
         _ =>{
             log::error!("Matching VSS not provided {}, canceling execution",vss_type);
             return Ok(());
