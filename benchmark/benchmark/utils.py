@@ -38,7 +38,7 @@ class PathMaker:
     @staticmethod
     def key_file(i):
         assert isinstance(i, int) and i >= 0
-        return f'nodes-{i}.json'
+        return f'./configs/nodes-{i}.json'
 
     @staticmethod
     def db_path(i, j=None):
@@ -49,7 +49,7 @@ class PathMaker:
 
     @staticmethod
     def logs_path():
-        return '.'
+        return './logs'
 
     @staticmethod
     def primary_log_file(i):

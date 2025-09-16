@@ -9,7 +9,7 @@ class CommandMaker:
     @staticmethod
     def cleanup():
         return (
-            f'rm -r .db-* ; rm .*.json ; mkdir -p {PathMaker.results_path()}'
+            f'rm -r .db-* ; rm -rf ./configs ; mkdir ./configs ; mkdir -p {PathMaker.results_path()}'
         )
 
     @staticmethod
@@ -26,28 +26,31 @@ class CommandMaker:
         return f'./node generate_keys --filename {filename}'
 
     @staticmethod
-    def generate_config_files(bport,client_bport,client_run_port,num_nodes):
-        return f'./genconfig --blocksize 100 --delay 100 --base_port {bport} --client_base_port {client_bport} --NumNodes {num_nodes} --target . --client_run_port {client_run_port} --local true'
+    def generate_config_files(bport, rbc_bport, dkg_bport, drb_bport, client_bport, client_run_port, num_nodes):
+        return (
+            f'./genconfig --blocksize 100 --delay 100 --base_port {bport} --rbc_base_port {rbc_bport} --dkg_base_port {dkg_bport} --drb_base_port {drb_bport} --client_base_port {client_bport} '
+            f'--NumNodes {num_nodes} --target ./configs --client_run_port {client_run_port} --local true --delta 10 --epsilon 1 --tri 100000 --expo 2 --hashrand_batch 40 --hashrand_freq 20 --trans_delay 500'
+            )
 
     @staticmethod
-    def run_primary(key,delay,ep,delta,val,tri,batch,rand, debug=False):
-        assert isinstance(key, str)
+    def run_primary(conf, delay,  debug=False):
+        assert isinstance(conf, str)
         assert isinstance(debug, bool)
-        #v = '-vvv' if debug else '-vv'
-        return (f'./node --config {key} --ip ip_file '
-                f'--sleep {delay} --batch 100 --epsilon {ep} --delta {delta} --val {val} --tri {tri} --vsstype del --syncer syncer --rand {rand} --expo 2')
-    
+        # v = '-vvv' if debug else '-vv'
+        return (f'./node --config {conf} '
+                f'--sleep {delay} --batch 100 --vsstype dkg --syncer ./configs/syncer --rand 10000')
+
     @staticmethod
-    def unzip_tkeys(fileloc,dir, debug=False):
+    def unzip_tkeys(fileloc, dir, debug=False):
         return (f'tar -xvzf {fileloc} && cp {dir}/* .')
-    
+
     @staticmethod
-    def run_syncer(key,delay, debug=False):
-        assert isinstance(key, str)
+    def run_syncer(conf, delay, debug=False):
+        assert isinstance(conf, str)
         assert isinstance(debug, bool)
-        #v = '-vvv' if debug else '-vv'
-        return (f'./node --config {key} --ip ip_file '
-                f'--sleep {delay} --batch 100 --epsilon 10 --delta 5000 --val 100 --tri 10 --vsstype sync --syncer syncer --rand 100000 --expo 2')
+        # v = '-vvv' if debug else '-vv'
+        return (f'./node --config {conf} '
+                f'--sleep {delay} --batch 100 --vsstype sync --syncer ./configs/syncer --rand 10000')
 
     @staticmethod
     def run_worker(keys, committee, store, parameters, id, debug=False):
@@ -76,5 +79,5 @@ class CommandMaker:
     @staticmethod
     def alias_binaries(origin):
         assert isinstance(origin, str)
-        node, client, genconfig = join(origin, 'node'), join(origin, 'benchmark_client'), join(origin,'genconfig')
-        return f'rm node ; rm benchmark_client ; rm genconfig ; ln -s {node} . ; ln -s {client} . ; ln -s {genconfig} .'
+        node,  genconfig = join(origin, 'node'), join(origin, 'genconfig')
+        return f'rm node ; rm genconfig ; ln -s {node} . ; ln -s {genconfig} .'

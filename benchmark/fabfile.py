@@ -9,7 +9,7 @@ from benchmark.instance import InstanceManager
 from benchmark.remote import Bench, BenchError
 from benchmark.utils import PathMaker
 
-nodes = 20
+nodes = 10
 @task
 def local(ctx, debug=True):
     ''' Run benchmarks on localhost '''
@@ -19,7 +19,7 @@ def local(ctx, debug=True):
         'workers': 1,
         'rate': 50_000,
         'tx_size': 512,
-        'duration': 20,
+        'duration': 16,
     }
     node_params = {
         'header_size': 1_000,  # bytes
