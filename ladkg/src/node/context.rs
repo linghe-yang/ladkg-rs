@@ -23,6 +23,7 @@ use std::collections::{HashMap, HashSet};
 use std::net::{SocketAddr, SocketAddrV4};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use avsss::rp::P_PRIME;
 use avsss::shamir_r::shamir_reconstruct_r;
 use tokio::sync::mpsc::{Receiver, Sender, UnboundedReceiver, channel, unbounded_channel};
 use tokio::sync::{mpsc, oneshot, RwLock};
@@ -267,8 +268,9 @@ impl Context {
         self.coin_req.send(20).await?;
         info!("Node {}: start sharing phase", self.myid);
         let mut rng = StdRng::from_rng(OsRng)?;
+        let sigma = 1f64;
         let secret =
-            DVector::from_iterator(X_LEN, (0..X_LEN).map(|_| R::random_gaussian(&mut rng, 1.0)));
+            DVector::from_iterator(X_LEN, (0..X_LEN).map(|_| R::random_gaussian(&mut rng, sigma)));
 
         let (prs, pus, st) = share(secret, self.num_nodes, self.num_faults, &self.pks);
 
@@ -301,7 +303,7 @@ impl Context {
             }
             VSSMsg::VSSPublicShare(pub_share, sender) => {
                 info!("Node {}: VSS public share received from: {}", self.myid, sender);
-                if !self.verify_pub_share(&pub_share) {return Ok(())}
+                if !self.verify_pub_share(&pub_share, sender) {return Ok(())}
                 self.pub_shares.entry(sender).or_insert(pub_share.clone());
                 if self.unvalidated_shares.contains_key(&sender) {
                     let my_share = self.unvalidated_shares.get(&sender).unwrap().clone();
@@ -407,17 +409,16 @@ impl Context {
         Ok(())
     }
 
-    pub fn verify_pub_share(&self, pub_share: &PublicShare) -> bool{
+    pub fn verify_pub_share(&self, pub_share: &PublicShare, sender: Replica) -> bool{
         let u = shamir_reconstruct(&pub_share.u_vec, self.num_faults);
         if u.is_none() {
             return false;
         }
         let u = u.unwrap();
-        let c = 1f64;
-        let p1 = (X_LEN * N) as f64 * c * R_SIGMA * c * X_SIGMA;
-        let p2 = (N as f64).sqrt() * c * Y_SIGMA;
-        let b_prime = (Y_LEN as f64).sqrt() * (p1 + p2);
         let v_norm = euclidean_norm(&u);
+
+        let b = P_PRIME / (82 * N as i64);
+        let b_prime = 0.5 * b as f64 * 26f64.sqrt();
         if v_norm > b_prime {
             return false;
         }
