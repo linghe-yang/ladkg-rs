@@ -324,6 +324,7 @@ impl Context {
                         let mut guard = self.certificate.write().await;
                         guard.entry(sender).or_insert(sig);
                         if guard.len() >= (2 * self.num_faults + 1) && !self.counting_down {
+                            self.counting_down = true;
                             self.gen_transcript();
                         }
                     }
@@ -489,13 +490,17 @@ impl Context {
                 .collect();
 
             store.ciphers = supple_ciphers;
-            let supple_shares = supple_share(store, &pks);
+            let mut supple_shares = Vec::default();
+            if !store.ciphers.is_empty(){
+                supple_shares = supple_share(store, &pks);
+            }
             let trans = Transcript {
                 id: myid,
                 cert,
                 pub_share,
                 supple_shares,
             };
+
 
             info!("Node {}: Transcript generated", myid);
             transcripts.write().await.entry(myid).or_insert(trans.clone());
