@@ -16,7 +16,7 @@ def local(ctx, debug=True):
     bench_params = {
         'faults': 0,
         'nodes': nodes,
-        'duration': 8,
+        'duration': 10,
     }
     dkg_params = {
         'delta': 10,
@@ -24,7 +24,7 @@ def local(ctx, debug=True):
         'tri': 100000,
         'hr_batch': 40,
         'hr_freq': 20,
-        'trans_delay': 500 # ms
+        'trans_delay': 0 # ms
     }
     try:
         ret = LocalBench(bench_params, dkg_params).run(debug)

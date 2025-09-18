@@ -71,8 +71,6 @@ pub struct Context {
     pub coin_req: Sender<u32>,
     pub coin_recv: Receiver<(u32,u128)>,
 
-    pub salt: HashMap<u32, u128>,
-
     pub cancel_handlers: HashMap<Round, Vec<CancelHandler<Acknowledgement>>>,
     exit_rx: oneshot::Receiver<()>,
 
@@ -191,7 +189,6 @@ impl Context {
 
                     coin_req,
                     coin_recv: coin_to_dkg_rx,
-                    salt: HashMap::new(),
 
                     exit_rx,
                     cancel_handlers: HashMap::default(),
@@ -327,7 +324,11 @@ impl Context {
                         guard.entry(sender).or_insert(sig);
                         if guard.len() >= (2 * self.num_faults + 1) && !self.counting_down {
                             self.counting_down = true;
-                            self.gen_transcript();
+                            if self.trans_waiting_time == 0 {
+                                self.gen_transcript_instant(&guard).await;
+                            }else {
+                                self.gen_transcript();
+                            }
                         }
                     }
                 }
@@ -461,6 +462,41 @@ impl Context {
         self.p2p_send(msg, sender).await;
     }
 
+    pub async fn gen_transcript_instant(&self, guard: &HashMap<Replica,Signature>){
+        let guard = guard.clone();
+        info!("Node {}: Start generating transcript", self.myid);
+        let cert: Vec<(Replica, Signature)> = guard.into_iter().collect();
+        let supple_indices = find_missing_replicas(&cert, self.num_nodes);
+        let missing_set: HashSet<i32> = supple_indices
+            .into_iter()
+            .filter_map(|r| i32::try_from(r + 1).ok()) // 瀹夊叏鍦板皢 usize 杞崲涓?i32
+            .collect();
+        let mut store = self.store.clone();
+        let supple_ciphers: Vec<(i32, DVector<R>, DVector<R>, Store)> = store
+            .ciphers
+            .iter()
+            .filter(|(i, _, _, _)| missing_set.contains(i))
+            .cloned() // 鍋囪闇€瑕佸厠闅嗘暟鎹?
+            .collect();
+
+        store.ciphers = supple_ciphers;
+        let mut supple_shares = Vec::default();
+        if !store.ciphers.is_empty(){
+            supple_shares = supple_share(store, &self.pks);
+        }
+        let pub_share = self.pub_shares.get(&self.myid).unwrap().clone();
+        let trans = Transcript {
+            id: self.myid,
+            cert,
+            pub_share,
+            supple_shares,
+        };
+
+
+        info!("Node {}: Transcript generated", self.myid);
+        self.transcripts.write().await.entry(self.myid).or_insert(trans.clone());
+        self.trans_tx.send(trans).await.unwrap();
+    }
     pub fn gen_transcript(&self) {
         let num_nodes = self.num_nodes;
         let mut store = self.store.clone();
@@ -502,13 +538,13 @@ impl Context {
                 supple_shares,
             };
 
-
             info!("Node {}: Transcript generated", myid);
             transcripts.write().await.entry(myid).or_insert(trans.clone());
             trans_tx.send(trans).await.unwrap();
         });
-    }
 
+
+    }
     pub fn sum_secret_key(&self, decided_trans: &Vec<Transcript>) -> Option<DVector<R>> {
         let mut result: Option<DVector<R>> = None;
         for transcript in decided_trans {
