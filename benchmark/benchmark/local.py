@@ -1,9 +1,10 @@
 # Copyright(C) Facebook, Inc. and its affiliates.
 import subprocess
+from datetime import datetime, timedelta
 from math import ceil
 from os.path import basename, splitext
 from random import random
-from time import sleep
+import time
 
 from benchmark.commands import CommandMaker
 from benchmark.config import Key, LocalCommittee, NodeParameters, BenchParameters, ConfigError, DKGParameters
@@ -60,7 +61,7 @@ class LocalBench:
             # Cleanup all files.
             cmd = f'{CommandMaker.clean_logs()} ; {CommandMaker.cleanup()}'
             subprocess.run([cmd], shell=True, stderr=subprocess.DEVNULL)
-            sleep(0.5)  # Removing the store may take time.
+            time.sleep(0.5)  # Removing the store may take time.
 
             # Recompile the latest code.
             cmd = CommandMaker.compile().split()
@@ -75,10 +76,14 @@ class LocalBench:
             cmd = CommandMaker.generate_config_files(self.BASE_PORT, self.RBC_BASE_PORT, self.DKG_BASE_PORT,
                                                      self.DRB_BASE_PORT, self.cl_bport, self.cl_rport, nodes, self.dkg_params)
             self._background_run(cmd, "err.log")
+            time.sleep(1)
 
-            sleep(2)
 
-            st_time = 1000
+            now = datetime.now()
+            sleep_time = 5
+            future = now + timedelta(seconds=sleep_time)
+            st_time = int(future.timestamp() * 1000)
+
             # Run the syncer .
             cmd = CommandMaker.run_syncer(
                 PathMaker.key_file(0),
@@ -98,8 +103,8 @@ class LocalBench:
                 log_file = PathMaker.primary_log_file(i)
                 self._background_run(cmd, log_file)
 
-            Print.info(f'Running benchmark ({self.duration} sec)...')
-            sleep(self.duration)
+            Print.info(f'Running benchmark ({self.duration + sleep_time} sec)...')
+            time.sleep(self.duration + sleep_time)
             self._kill_nodes()
 
             # Parse logs and return the parser.

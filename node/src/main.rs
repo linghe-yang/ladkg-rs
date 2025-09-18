@@ -8,8 +8,9 @@ use clap::{
 use config::Node;
 use signal_hook::{iterator::Signals, consts::{SIGINT, SIGTERM}};
 use types::{Val};
-use std::{net::{SocketAddr, SocketAddrV4}};
+use std::{net::{SocketAddr, SocketAddrV4}, thread};
 use std::sync::Arc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use env_logger::Env;
 use fnv::FnvHashMap;
 use log::info;
@@ -57,6 +58,19 @@ async fn main() -> Result<()> {
         "yaml" => Node::from_yaml(str),
         _ => panic!("Invalid config file extension"),
     };
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("System time error")
+        .as_millis();
+
+    if _sleep > now {
+        let duration_ms = (_sleep - now) as u64;
+        let sleep_duration = Duration::from_millis(duration_ms);
+
+        // 线程休眠
+        tokio::time::sleep(sleep_duration).await;
+    }
 
     // simple_logger::SimpleLogger::new().with_utc_timestamps().init().unwrap();
     //

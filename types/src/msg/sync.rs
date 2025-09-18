@@ -7,7 +7,8 @@ use crate::{WireReady, Replica};
 pub enum SyncState{
     ALIVE,
     StartVSS,
-    COMPLETED(Box<R>),
+    SkComplete,
+    PkComplete(Box<R>),
     STOP
 }
 

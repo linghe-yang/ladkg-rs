@@ -72,14 +72,12 @@ pub struct Context {
     pub coin_recv: Receiver<(u32,u128)>,
 
     pub cancel_handlers: HashMap<Round, Vec<CancelHandler<Acknowledgement>>>,
-    exit_rx: oneshot::Receiver<()>,
 
     counting_down: bool
 }
 
 impl Context {
-    pub fn spawn(config: Node) -> anyhow::Result<(oneshot::Sender<()>, oneshot::Sender<()>, oneshot::Sender<()>)> {
-        let exit_tx_acs;
+    pub fn spawn(config: Node) -> anyhow::Result<oneshot::Sender<()>> {
         let exit_tx_hr;
 
         let prot_payload = &config.prot_payload;
@@ -138,8 +136,7 @@ impl Context {
             }
         });
 
-        exit_tx_acs =
-            acs::node::Context::spawn(acs_config, coin_construct.clone(), coin_to_acs_rx, trans_rx, acs_res_tx)?;
+        acs::node::Context::spawn(acs_config, coin_construct.clone(), coin_to_acs_rx, trans_rx, acs_res_tx)?;
 
         exit_tx_hr = HashRand::spawn(
             hr_config,
@@ -152,7 +149,6 @@ impl Context {
 
 
         if v[0] == "a" {
-            let (exit_tx, exit_rx) = oneshot::channel();
             let coin_req = coin_construct.clone();
 
             tokio::spawn(async move {
@@ -189,8 +185,6 @@ impl Context {
 
                     coin_req,
                     coin_recv: coin_to_dkg_rx,
-
-                    exit_rx,
                     cancel_handlers: HashMap::default(),
                     counting_down: false
                 };
@@ -205,7 +199,7 @@ impl Context {
 
 
 
-            Ok((exit_tx,exit_tx_acs,exit_tx_hr))
+            Ok(exit_tx_hr)
         } else {
             panic!("Invalid configuration for protocol");
         }
@@ -221,12 +215,7 @@ impl Context {
 
         loop {
             tokio::select! {
-                // Handle exit signal
-                result = &mut self.exit_rx => {
-                    result.map_err(|_| anyhow!("Exit channel closed"))?;
-                    info!("Termination signal received. Exiting.");
-                    break;
-                }
+
                 // Handle network messages
                 Some(msg) = self.net_recv.recv() => {
                     self.handle_network_message(msg).await?;
@@ -247,7 +236,6 @@ impl Context {
                             info!("DKG Stop time: {:?}", SystemTime::now()
                                 .duration_since(UNIX_EPOCH)?
                                 .as_millis());
-                            break
                         },
                         _=>{}
                     }
@@ -258,7 +246,6 @@ impl Context {
                 }
             }
         }
-        Ok(())
     }
 
     pub async fn sharing_phase(&mut self) -> Result<(), anyhow::Error>{
@@ -348,7 +335,7 @@ impl Context {
                         self.th_pk = b;
                         let cancel_handler = self.sync_send.send(
                             0,
-                            SyncMsg { sender: self.myid, state: SyncState::COMPLETED(Box::new(b))}).await;
+                            SyncMsg { sender: self.myid, state: SyncState::PkComplete(Box::new(b))}).await;
                         self.add_cancel_handler(cancel_handler);
 
                     }else {
@@ -393,6 +380,11 @@ impl Context {
         }
         let th_sk = self.sum_secret_key(&decided_trans).unwrap();
         self.th_sk = th_sk.clone();
+
+        let cancel_handler = self.sync_send.send(
+            0,
+            SyncMsg { sender: self.myid, state: SyncState::SkComplete}).await;
+        self.add_cancel_handler(cancel_handler);
 
         info!("Node {}: secret key formed: {:?}",self.myid, self.th_sk);
         if let Some((_,coin)) = self.coin_recv.recv().await {
@@ -469,14 +461,14 @@ impl Context {
         let supple_indices = find_missing_replicas(&cert, self.num_nodes);
         let missing_set: HashSet<i32> = supple_indices
             .into_iter()
-            .filter_map(|r| i32::try_from(r + 1).ok()) // 瀹夊叏鍦板皢 usize 杞崲涓?i32
+            .filter_map(|r| i32::try_from(r + 1).ok())
             .collect();
         let mut store = self.store.clone();
         let supple_ciphers: Vec<(i32, DVector<R>, DVector<R>, Store)> = store
             .ciphers
             .iter()
             .filter(|(i, _, _, _)| missing_set.contains(i))
-            .cloned() // 鍋囪闇€瑕佸厠闅嗘暟鎹?
+            .cloned()
             .collect();
 
         store.ciphers = supple_ciphers;
@@ -517,13 +509,13 @@ impl Context {
             let supple_indices = find_missing_replicas(&cert, num_nodes);
             let missing_set: HashSet<i32> = supple_indices
                 .into_iter()
-                .filter_map(|r| i32::try_from(r + 1).ok()) // 瀹夊叏鍦板皢 usize 杞崲涓?i32
+                .filter_map(|r| i32::try_from(r + 1).ok())
                 .collect();
             let supple_ciphers: Vec<(i32, DVector<R>, DVector<R>, Store)> = store
                 .ciphers
                 .iter()
                 .filter(|(i, _, _, _)| missing_set.contains(i))
-                .cloned() // 鍋囪闇€瑕佸厠闅嗘暟鎹?
+                .cloned()
                 .collect();
 
             store.ciphers = supple_ciphers;

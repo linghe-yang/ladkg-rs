@@ -9,7 +9,7 @@ from benchmark.instance import InstanceManager
 from benchmark.remote import Bench, BenchError
 from benchmark.utils import PathMaker
 
-nodes = 4
+nodes = 16
 @task
 def local(ctx, debug=True):
     ''' Run benchmarks on localhost '''
@@ -24,7 +24,7 @@ def local(ctx, debug=True):
         'tri': 100000,
         'hr_batch': 40,
         'hr_freq': 20,
-        'trans_delay': 0 # ms
+        'trans_delay': 500 # ms
     }
     try:
         ret = LocalBench(bench_params, dkg_params).run(debug)

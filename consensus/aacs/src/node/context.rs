@@ -1,5 +1,4 @@
 use crate::node::handler::Handler;
-use anyhow::anyhow;
 use config::Node;
 use delphi::node::Delphi;
 use fnv::FnvHashMap;
@@ -13,7 +12,6 @@ use std::collections::{HashMap, HashSet};
 use std::net::{SocketAddr, SocketAddrV4};
 use std::sync::Arc;
 use tokio::sync::mpsc::{Receiver, Sender, UnboundedReceiver, unbounded_channel, channel};
-use tokio::sync::{oneshot};
 use types::dkg::msg::{ACSMsg, ACSWrapperMsg};
 use types::{Replica, Round, Val};
 use types::dkg::trans::Transcript;
@@ -56,7 +54,6 @@ pub struct Context {
     pub terminated: bool,
 
     pub cancel_handlers: HashMap<Round, Vec<CancelHandler<Acknowledgement>>>,
-    exit_rx: oneshot::Receiver<()>,
 
 }
 
@@ -68,8 +65,7 @@ impl Context {
 
         trans_recv: Receiver<Transcript>,
         res_send: Sender<Vec<Transcript>>,
-    ) -> anyhow::Result<oneshot::Sender<()>> {
-        let _exit_tx_vec;
+    ) -> anyhow::Result<()> {
         let prot_payload = &config.prot_payload;
         let v: Vec<&str> = prot_payload.split(',').collect();
         let mut consensus_addrs: FnvHashMap<Replica, SocketAddr> = FnvHashMap::default();
@@ -96,11 +92,10 @@ impl Context {
 
         let (val_tx, val_rx) = channel(100);
         let (res_tx, res_rx) = channel(100);
-        _exit_tx_vec = Delphi::spawn(config.clone(), val_rx, Arc::new(res_tx))?;
+        Delphi::spawn(config.clone(), val_rx, Arc::new(res_tx))?;
 
 
         if v[0] == "a" {
-            let (exit_tx, exit_rx) = oneshot::channel();
             tokio::spawn(async move {
                 let mut c = Context {
                     net_send: consensus_net,
@@ -136,7 +131,6 @@ impl Context {
                     res_send,
 
                     terminated: false,
-                    exit_rx,
                     cancel_handlers: HashMap::default(),
                 };
                 for (id, sk_data) in config.sk_map.clone() {
@@ -147,7 +141,7 @@ impl Context {
                 }
                 log::debug!("Started n-parallel RBC");
             });
-            Ok(exit_tx)
+            Ok(())
         } else {
             panic!("Invalid configuration for protocol");
         }
@@ -176,12 +170,6 @@ impl Context {
                     info!("Node {}: Transcript received from VSS", self.myid);
                     self.broadcast(ACSMsg::RBCTrans(transcript.clone(), self.myid)).await;
                 }
-                // Handle exit signal
-                result = &mut self.exit_rx => {
-                    result.map_err(|_| anyhow!("Exit channel closed"))?;
-                    info!("Termination signal received. Exiting.");
-                    break;
-                }
                 // Handle network messages
                 Some(msg) = self.net_recv.recv() => {
                     self.handle_network_message(msg).await?;
@@ -193,7 +181,6 @@ impl Context {
 
             }
         }
-        Ok(())
     }
 
     /// Handles incoming network messages

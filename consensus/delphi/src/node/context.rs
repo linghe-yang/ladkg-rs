@@ -15,7 +15,6 @@ use std::{
 use tokio::sync::mpsc::{Receiver, Sender, UnboundedSender};
 use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedReceiver},
-    oneshot,
 };
 use tokio::sync::{mpsc, Mutex};
 use types::{
@@ -65,8 +64,6 @@ pub struct Delphi {
     pub max_input: Val,
     /// State context: Contains the map of levels from 0 to total_levels. Keeps track of Binary Approximate Agreement instances at all levels.
     pub round_state: HashMap<Lev, Level>,
-    /// Exit protocol
-    pub exit_rx: oneshot::Receiver<()>,
     /// Cancel Handlers
     pub cancel_handlers: HashMap<Round, Vec<CancelHandler<Acknowledgement>>>,
 
@@ -91,7 +88,7 @@ impl Delphi {
         // exponent: f32,
         mut val_rx: Receiver<(usize, Val)>,
         result_sender: Arc<Sender<(usize, Val)>>,
-    ) -> anyhow::Result<Arc<Mutex<Vec<(usize,oneshot::Sender<()>)>>>> {
+    ) ->Result<()>{
         let epsilon = config.delphi.epsilon;
         let rho = config.delphi.delta;
         let maxrange = config.delphi.tri;
@@ -153,14 +150,11 @@ impl Delphi {
         //     Acknowledgement,
         // >::with_peers(syncer_map)));
         if v[0] == "a" {
-            let exit_txs = Arc::new(Mutex::new(Vec::new()));
-            let exit_txs_clone = Arc::clone(&exit_txs);
             tokio::spawn(async move {
                 while let Some((inst_id, value)) = val_rx.recv().await {
                     log::info!("Start delphi for inst: {:?} with val: {}", inst_id, value);
                     if let Some(rx_net_to_consensus) = receivers.remove(&inst_id) {
                         // if let Some(rx_net_from_client) = sync_receivers.remove(&inst_id) {
-                        let (exit_tx, exit_rx) = oneshot::channel(); // 涓烘瘡涓疄渚嬪垱寤虹嫭绔嬬殑閫氶亾
                         let (consensus_tx, consensus_rx) = mpsc::channel(1);
                         let net_send = Arc::clone(&consensus_net);
                         // let sync_send = Arc::clone(&sync_net);
@@ -218,7 +212,6 @@ impl Delphi {
                                 input: value,
                                 max_input,
                                 round_state: levelmap,
-                                exit_rx, // 浣跨敤鐙珛鐨?exit_rx
                                 cancel_handlers: HashMap::default(),
                                 del_inst_id: inst_id,
                                 res_sender,
@@ -232,7 +225,6 @@ impl Delphi {
                                 log::error!("Consensus error for instance {}: {}", inst_id, e);
                             }
                         });
-                        exit_txs_clone.lock().await.push((inst_id,exit_tx));
                         // }
                         // else {
                         //     log::error!("No sync receiver found for inst_id: {}", inst_id);
@@ -243,7 +235,7 @@ impl Delphi {
                 }
 
             });
-            Ok(exit_txs)
+            Ok(())
 
         } else {
             panic!("Invalid configuration for protocol");
@@ -307,11 +299,6 @@ impl Delphi {
 
         loop {
             tokio::select! {
-                exit_val = &mut self.exit_rx => {
-                    exit_val.map_err(anyhow::Error::new)?;
-                    log::info!("Termination signal received by the server (inst_id: {}). Exiting.", inst_id);
-                    break
-                },
                 msg = self.net_recv.recv() => {
                     let msg = msg.ok_or_else(|| anyhow!("Networking layer has closed"))?;
                     log::debug!("Got a consensus message from the network (inst_id: {}): {:?}", inst_id, msg);
@@ -356,7 +343,6 @@ impl Delphi {
 
             }
         }
-        Ok(())
     }
     pub fn add_cancel_handler(&mut self, canc: CancelHandler<Acknowledgement>) {
         self.cancel_handlers
