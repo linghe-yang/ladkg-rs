@@ -30,6 +30,8 @@ impl Syncer{
         net_map: FnvHashMap<Replica,String>,
         cli_addr:SocketAddr,
     )-> Result<oneshot::Sender<()>>{
+
+
         let (exit_tx, exit_rx) = oneshot::channel();
         let (tx_net_to_server, rx_net_to_server) = unbounded_channel();
         let cli_addr_sock = cli_addr.port();
@@ -149,3 +151,4 @@ impl Syncer{
             .push(canc);
     }
 }
+

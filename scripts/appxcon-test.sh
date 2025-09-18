@@ -39,7 +39,7 @@ for((i=0;i<4;i++)); do
     --vsstype del \
     --syncer $1 \
     --batch 10 \
-    --rand $rand > logs/$i.log &
+    --rand $rand 2> logs/$i.log &
 done
 
 # Kill all nodes sudo lsof -ti:7000-7015 | xargs kill -9

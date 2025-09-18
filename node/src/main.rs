@@ -10,7 +10,9 @@ use signal_hook::{iterator::Signals, consts::{SIGINT, SIGTERM}};
 use types::{Val};
 use std::{net::{SocketAddr, SocketAddrV4}};
 use std::sync::Arc;
+use env_logger::Env;
 use fnv::FnvHashMap;
+use log::info;
 use tokio::sync::mpsc::{channel};
 use node::Syncer;
 use types::dkg::trans::Transcript;
@@ -18,6 +20,11 @@ use types::dkg::trans::Transcript;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+
+    let mut logger = env_logger::Builder::from_env(Env::default().default_filter_or("info"));
+    logger.format_timestamp_millis();
+    logger.init();
+
     log::error!("{}", std::env::current_dir().unwrap().display());
     let yaml = load_yaml!("cli.yml");
     let m = App::from_yaml(yaml).get_matches();
@@ -51,14 +58,16 @@ async fn main() -> Result<()> {
         _ => panic!("Invalid config file extension"),
     };
 
-    simple_logger::SimpleLogger::new().with_utc_timestamps().init().unwrap();
+    // simple_logger::SimpleLogger::new().with_utc_timestamps().init().unwrap();
+    //
+    // log::set_max_level(log::LevelFilter::Info);
+
     // match m.occurrences_of("debug") {
     //     0 => log::set_max_level(log::LevelFilter::Info),
     //     1 => log::set_max_level(log::LevelFilter::Debug),
     //     2 | _ => log::set_max_level(log::LevelFilter::Trace),
     // }
     // log::info!("epsilon: {:?},delta: {:?},value: {:?}, tri:{:?}",config.delphi.epsilon,config.delphi.delta,val_appx,config.delphi.tri);
-    log::set_max_level(log::LevelFilter::Info);
     // config
     //     .validate()
     //     .expect("The decoded config is not valid");
@@ -139,8 +148,9 @@ async fn main() -> Result<()> {
         // }
 
         "sync" => {
+            print_params(&config);
             let f_str = syncer_file.to_string();
-            log::info!("Logging the file f {}",f_str);
+            info!("Logging the file f {}",f_str);
             let ip_str = util::io::file_to_ips(f_str);
             let mut net_map = FnvHashMap::default();
             let mut idx = 0;
@@ -199,33 +209,13 @@ fn parse_val_string(input: &str) -> Result<Vec<Val>, String> {
 }
 
 
-// fn gen_hashrand_config(config: &Node) -> HashRandConfig {
-//     HashRandConfig {
-//         net_map: config.net_map_drb.clone(),
-//         delta: config.delay,
-//         id: config.id,
-//         num_nodes: config.num_nodes,
-//         num_faults: config.num_faults,
-//         block_size: config.block_size,
-//         client_port: config.client_port,
-//         client_addr: config.client_addr,
-//         payload: config.payload,
-//         prot_payload: "cc,123".to_string(),
-//         crypto_alg: trans_hashrand_algorithm(&config.crypto_alg),
-//         pk_map: config.pk_map.clone(),
-//         secret_key_bytes: config.secret_key_bytes.clone(),
-//         sk_map: config.sk_map.clone(),
-//         my_cert: config.my_cert.clone(),
-//         my_cert_key: config.my_cert_key.clone(),
-//         root_cert: config.root_cert.clone(),
-//     }
-// }
-//
-// fn trans_hashrand_algorithm(alg: &Algorithm) -> HashRandAlgorithm {
-//     match alg {
-//         Algorithm::RSA => HashRandAlgorithm::RSA,
-//         Algorithm::ED25519 => HashRandAlgorithm::ED25519,
-//         Algorithm::NOPKI => HashRandAlgorithm::NOPKI,
-//         Algorithm::SECP256K1 => HashRandAlgorithm::SECP256K1,
-//     }
-// }
+fn print_params(config: &Node){
+    info!("delta: {}", config.delphi.delta);
+    info!("epsilon: {}", config.delphi.epsilon);
+    info!("tri: {}", config.delphi.tri);
+    info!("kappa: {}", config.acs.kappa);
+    info!("trans_waiting_time: {}", config.dkg.trans_waiting_time);
+    info!("hashrand batch: {}", config.drb.batch);
+    info!("hashrand frequency: {}", config.drb.frequency);
+
+}

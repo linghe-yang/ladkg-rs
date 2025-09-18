@@ -32,3 +32,4 @@ hrconfig = {package = "config" , git = "https://github.com/linghe-yang/hashrand-
 hrcrypto = {package = "crypto" , git = "https://github.com/linghe-yang/hashrand-rs.git"}
 crypto = {package = "crypto", path = "../crypto"}
 avsss = { package = "avsss", git = "https://github.com/linghe-yang/lvss.git"}
+env_logger = "0.8.4"

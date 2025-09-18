@@ -21,7 +21,7 @@ echo $st_time
     --vsstype sync \
     --syncer $1 \
     --batch 10 \
-    --rand $rand > logs/syncer.log &
+    --rand $rand 2> logs/syncer.log &
 for((i=0;i<4;i++)); do
 ./target/$TYPE/node \
     --config $TESTDIR/nodes-$i.json \
@@ -30,7 +30,7 @@ for((i=0;i<4;i++)); do
     --vsstype dkg \
     --syncer $1 \
     --batch 10 \
-    --rand $rand > logs/$i.log &
+    --rand $rand 2> logs/$i.log &
 done
 
 # Kill all nodes sudo lsof -ti:7000-7015 | xargs kill -9
