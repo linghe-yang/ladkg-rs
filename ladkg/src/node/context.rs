@@ -1,6 +1,6 @@
 use crate::node::handler::Handler;
 use anyhow::anyhow;
-use avsss::components::{PrivateShare, PublicShare, R_SIGMA, SharingStore, X_LEN, Y_LEN, decrypt, is_merkle_valid, share, supple_share, try_decrypt, BETA, X_SIGMA, Y_SIGMA};
+use avsss::components::{PrivateShare, PublicShare, R_SIGMA, SharingStore, X_LEN, Y_LEN, decrypt, is_merkle_valid, share, supple_share, try_decrypt, BETA};
 use avsss::r_ring::{N, R};
 use avsss::shamir::{shamir_reconstruct};
 use avsss::util::generate_r_matrix;
@@ -303,7 +303,7 @@ impl Context {
             }
             VSSMsg::VSSPublicShare(pub_share, sender) => {
                 info!("Node {}: VSS public share received from: {}", self.myid, sender);
-                if !self.verify_pub_share(&pub_share, sender) {return Ok(())}
+                if !self.verify_pub_share(&pub_share) {return Ok(())}
                 self.pub_shares.entry(sender).or_insert(pub_share.clone());
                 if self.unvalidated_shares.contains_key(&sender) {
                     let my_share = self.unvalidated_shares.get(&sender).unwrap().clone();
@@ -409,7 +409,7 @@ impl Context {
         Ok(())
     }
 
-    pub fn verify_pub_share(&self, pub_share: &PublicShare, sender: Replica) -> bool{
+    pub fn verify_pub_share(&self, pub_share: &PublicShare) -> bool{
         let u = shamir_reconstruct(&pub_share.u_vec, self.num_faults);
         if u.is_none() {
             return false;

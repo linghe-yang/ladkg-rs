@@ -54,8 +54,7 @@ class PathMaker:
     @staticmethod
     def primary_log_file(i):
         assert isinstance(i, int) and i >= 0
-        return join(PathMaker.logs_path(), f'{i}.log')
-        #return join(PathMaker.logs_path(), f'primary-{i}.log')
+        return join(PathMaker.logs_path(), f'primary-{i}.log')
 
     @staticmethod
     def worker_log_file(i, j):

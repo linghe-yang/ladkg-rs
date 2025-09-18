@@ -14,8 +14,8 @@ class ParseError(Exception):
 
 
 class LogParser:
-    def __init__(self, clients, primaries, workers, faults=0):
-        inputs = [clients, primaries, workers]
+    def __init__(self, syncer, primaries, faults=0):
+        inputs = [syncer, primaries]
         assert all(isinstance(x, list) for x in inputs)
         assert all(isinstance(x, str) for y in inputs for x in y)
         assert all(x for x in inputs)
@@ -23,302 +23,192 @@ class LogParser:
         self.faults = faults
         if isinstance(faults, int):
             self.committee_size = len(primaries) + int(faults)
-            self.workers =  len(workers) // len(primaries)
         else:
             self.committee_size = '?'
-            self.workers = '?'
 
-        # Parse the clients logs.
+        # Parse syncer log
+        if not syncer:
+            raise ParseError("Syncer log list is empty")
+        try:
+            self.protocol_time = self._parse_syncer(syncer[0])
+        except ParseError as e:
+            raise e
+        except (ValueError, IndexError, AttributeError) as e:
+            raise ParseError(f'Failed to parse syncer log: {e}')
+
         try:
             with Pool() as p:
-                results = p.map(self._parse_lat, clients)
-                results = [i for i in results if i > 0]
+                results_primary = p.map(self._parse_primaries, primaries)
+            averages = self._compute_primary_averages(results_primary)
+            self.averages = averages
         except (ValueError, IndexError, AttributeError) as e:
-            raise ParseError(f'Failed to parse clients\' logs: {e}')
-        try:
-            with Pool() as p:
-                results_recon = p.map(self._parse_lat_recon, clients)
-                results_recon = [i for i in results_recon if i > 0]
-        except (ValueError, IndexError, AttributeError) as e:
-            raise ParseError(f'Failed to parse clients\' logs: {e}')
-        print(results,results_recon)
-        print(mean(results),mean(results_recon))
-        try:
-            with Pool() as p:
-                results = p.map(self._start_times, clients)
-                results.sort()
-        except (ValueError, IndexError, AttributeError) as e:
-            raise ParseError(f'Failed to parse clients\' logs: {e}')
-        try:
-            with Pool() as p:
-                results_recon = p.map(self._end_times, clients)
-                results_recon = [i for i in results_recon if i >= 0]
-                results_recon.sort()
-        except (ValueError, IndexError, AttributeError) as e:
-            raise ParseError(f'Failed to parse clients\' logs: {e}')
-        print(results,results_recon)
-        #print(mean(results),mean(results_recon))
-        # self.size, self.rate, self.start, misses, self.sent_samples \
-        #     = zip(*results)
-        # self.misses = sum(misses)
-        # #print(self.size,self.rate,self.start,self.sent_samples)
-        # # Parse the primaries logs.
-        # try:
-        #     with Pool() as p:
-        #         results = p.map(self._parse_primaries, primaries)
-        # except (ValueError, IndexError, AttributeError) as e:
-        #     raise ParseError(f'Failed to parse nodes\' logs: {e}')
-        # #proposals, commits, self.configs, primary_ips = zip(*results)
-        # proposals, commits, primary_ips = zip(*results)
-        # self.proposals = self._merge_results([x.items() for x in proposals])
-        # self.commits = self._merge_results([x.items() for x in commits])
+            raise ParseError(f'Failed to parse primary\' logs: {e}')
 
-        # # Parse the workers logs.
-        # try:
-        #     with Pool() as p:
-        #         results = p.map(self._parse_workers, workers)
-        # except (ValueError, IndexError, AttributeError) as e:
-        #     raise ParseError(f'Failed to parse workers\' logs: {e}')
-        # sizes, self.received_samples, workers_ips = zip(*results)
-        # self.sizes = {
-        #     k: v for x in sizes for k, v in x.items() if k in self.commits
-        # }
+    def _parse_syncer(self, log):
+        # Extract configuration values
+        delta_match = search(r'delta: (\d+)', log)
+        epsilon_match = search(r'epsilon: (\d+)', log)
+        tri_match = search(r'tri: (\d+)', log)
+        kappa_match = search(r'kappa: (\d+)', log)
+        trans_waiting_time_match = search(r'trans_waiting_time: (\d+)', log)
+        hashrand_batch_match = search(r'hashrand batch: (\d+)', log)
+        hashrand_frequency_match = search(r'hashrand frequency: (\d+)', log)
 
-        # # Determine whether the primary and the workers are collocated.
-        # self.collocate = set(primary_ips) == set(workers_ips)
+        # Check if any field is missing
+        missing_fields = []
+        if delta_match is None:
+            missing_fields.append("delta")
+        if epsilon_match is None:
+            missing_fields.append("epsilon")
+        if tri_match is None:
+            missing_fields.append("tri")
+        if kappa_match is None:
+            missing_fields.append("kappa")
+        if trans_waiting_time_match is None:
+            missing_fields.append("trans_waiting_time")
+        if hashrand_batch_match is None:
+            missing_fields.append("hashrand batch")
+        if hashrand_frequency_match is None:
+            missing_fields.append("hashrand frequency")
 
-        # # Check whether clients missed their target rate.
-        # if self.misses != 0:
-        #     Print.warn(
-        #         f'Clients missed their target rate {self.misses:,} time(s)'
-        #     )
+        if missing_fields:
+            raise ParseError(f"Failed to parse syncer log: missing fields {', '.join(missing_fields)}")
 
-    def _merge_results(self, input):
-        # Keep the earliest timestamp.
-        merged = {}
-        for x in input:
-            for k, v in x:
-                if not k in merged or merged[k] > v:
-                    merged[k] = v
-        return merged
-    def _start_times(self,log):
-        start = search(r'Sharing Start time: (\d+)', log)
-        if start!= None:
-            start = int(start.group(1))
-        else:
-            start = 0
-            return 0
-        return start
+        # Set instance attributes
+        self.delta = int(delta_match.group(1))
+        self.epsilon = int(epsilon_match.group(1))
+        self.tri = int(tri_match.group(1))
+        self.kappa = int(kappa_match.group(1))
+        self.trans_waiting_time = int(trans_waiting_time_match.group(1))
+        self.hashrand_batch = int(hashrand_batch_match.group(1))
+        self.hashrand_frequency = int(hashrand_frequency_match.group(1))
 
-    def _end_times(self,log):
-        end = search(r'Sharing End time: (\d+)', log)
-        if end!= None:
-            end = int(end.group(1))
-        else:
-            end = 0
-            return 0
-        return end
-    def _parse_lat(self, log):
-        #if search(r'Error', log) is not None:
-        #    raise ParseError('Client(s) panicked')
+        # Extract start time from "StartVSS message broadcast to all nodes"
+        start_match = search(r'\[(.*Z) .* StartVSS message broadcast to all nodes', log)
+        if start_match is None:
+            raise ParseError("Failed to parse syncer log: missing StartVSS message")
+        start_time = self._to_posix(start_match.group(1))
 
-        start = search(r'Sharing Start time: (\d+)', log)
-        if start!= None:
-            start = int(start.group(1))
-        else:
-            start = 0
-            return 0
-        end = search(r'Sharing End time: (\d+)', log)
-        if end!= None:
-            end = int(end.group(1))
-        else:
-            end = 0
-            return 0
-        #tmp = search(r'(.*Z) .* Start ', log).group(1)
-        #start = self._to_posix(tmp)
-        #misses = len(findall(r'rate too high', log))
+        # Extract end time from "STOP message broadcast to all nodes"
+        end_match = search(r'\[(.*Z) .* STOP message broadcast to all nodes', log)
+        if end_match is None:
+            raise ParseError("Failed to parse syncer log: missing STOP message")
+        end_time = self._to_posix(end_match.group(1))
 
-        #tmp = findall(r'(.*Z) .* sample transaction (\d+)', log)
-        #samples = {int(s): self._to_posix(t) for t, s in tmp}
-
-        return end-start
-    def _parse_lat_recon(self, log):
-        #if search(r'Error', log) is not None:
-        #    raise ParseError('Client(s) panicked')
-        start = search(r'Start reconstruction (\d+)', log)
-        if start!= None:
-            start = int(start.group(1))
-        else:
-            start = 0
-            return 0
-        end = search(r'Recon ended: (\d+)', log)
-        if end!= None:
-            end = int(end.group(1))
-        else:
-            end = 0
-            return 0
-        # end = int(search(r'Recon ended (\d+)', log).group(1))
-        #tmp = search(r'(.*Z) .* Start ', log).group(1)
-        #start = self._to_posix(tmp)
-        #misses = len(findall(r'rate too high', log))
-
-        #tmp = findall(r'(.*Z) .* sample transaction (\d+)', log)
-        #samples = {int(s): self._to_posix(t) for t, s in tmp}
-
-        return end-start
-
-    def _parse_clients(self, log):
-        #if search(r'Error', log) is not None:
-        #    raise ParseError('Client(s) panicked')
-
-        size = int(search(r'Transactions size: (\d+)', log).group(1))
-        rate = int(search(r'Transactions rate: (\d+)', log).group(1))
-        tmp = search(r'(.*Z) .* Start ', log).group(1)
-        start = self._to_posix(tmp)
-        misses = len(findall(r'rate too high', log))
-
-        tmp = findall(r'(.*Z) .* sample transaction (\d+)', log)
-        samples = {int(s): self._to_posix(t) for t, s in tmp}
-
-        return size, rate, start, misses, samples
+        # Calculate time difference in milliseconds
+        return (end_time - start_time) * 1000
 
     def _parse_primaries(self, log):
-        #if search(r'(?:panicked|Error)', log) is not None:
-        #    raise ParseError('Primary(s) panicked')
+        # Extract DKG Start and Stop times (direct POSIX timestamps in milliseconds)
+        dkg_start_match = search(r'DKG Start time: (\d+)', log)
+        dkg_stop_match = search(r'DKG Stop time: (\d+)', log)
 
-        tmp = findall(r'(.*Z) .* Created B\d+\([^ ]+\) -> ([^ ]+")', log)
-        tmp = [(d, self._to_posix(t)) for t, d in tmp]
-        proposals = self._merge_results([tmp])
+        # Extract ISO timestamps for other phases
+        sharing_start_match = search(r'\[(.*Z) .* start sharing phase', log)
+        sharing_finish_match = search(r'\[(.*Z) .* finish sharing phase', log)
+        transcript_start_match = search(r'\[(.*Z) .* Start generating transcript', log)
+        transcript_generated_match = search(r'\[(.*Z) .* Transcript generated', log)
+        acs_result_match = search(r'\[(.*Z) .* All Transcript in final set received, ACS result formed', log)
+        secret_key_match = search(r'\[(.*Z) .* secret key formed', log)
+        reconstruct_start_match = search(r'\[(.*Z) .* Start reconstructing threshold public key', log)
 
-        tmp = findall(r'(.*Z) .* Committed B\d+\([^ ]+\) -> ([^ ]+")', log)
-        tmp = [(d, self._to_posix(t)) for t, d in tmp]
-        commits = self._merge_results([tmp])
+        # Check for missing fields
+        missing_fields = []
+        if dkg_start_match is None:
+            missing_fields.append("DKG Start time")
+        if dkg_stop_match is None:
+            missing_fields.append("DKG Stop time")
+        if sharing_start_match is None:
+            missing_fields.append("start sharing phase")
+        if sharing_finish_match is None:
+            missing_fields.append("finish sharing phase")
+        if transcript_start_match is None:
+            missing_fields.append("Start generating transcript")
+        if transcript_generated_match is None:
+            missing_fields.append("Transcript generated")
+        if acs_result_match is None:
+            missing_fields.append("All Transcript in final set received, ACS result formed")
+        if secret_key_match is None:
+            missing_fields.append("secret key formed")
+        if reconstruct_start_match is None:
+            missing_fields.append("Start reconstructing threshold public key")
 
-        # configs = {
-        #     'header_size': int(
-        #         search(r'Header size .* (\d+)', log).group(1)
-        #     ),
-        #     'max_header_delay': int(
-        #         search(r'Max header delay .* (\d+)', log).group(1)
-        #     ),
-        #     'gc_depth': int(
-        #         search(r'Garbage collection depth .* (\d+)', log).group(1)
-        #     ),
-        #     'sync_retry_delay': int(
-        #         search(r'Sync retry delay .* (\d+)', log).group(1)
-        #     ),
-        #     'sync_retry_nodes': int(
-        #         search(r'Sync retry nodes .* (\d+)', log).group(1)
-        #     ),
-        #     'batch_size': int(
-        #         search(r'Batch size .* (\d+)', log).group(1)
-        #     ),
-        #     'max_batch_delay': int(
-        #         search(r'Max batch delay .* (\d+)', log).group(1)
-        #     ),
-        # }
+        if missing_fields:
+            raise ParseError(f"Failed to parse primary log: missing fields {', '.join(missing_fields)}")
 
-        ip = search(r'booted on (\d+.\d+.\d+.\d+)', log).group(1)
-        print(ip)
-        return proposals, commits, ip
+        # Convert timestamps to milliseconds
+        dkg_start_time = int(dkg_start_match.group(1))
+        dkg_stop_time = int(dkg_stop_match.group(1))
+        sharing_start_time = int(self._to_posix(sharing_start_match.group(1)) * 1000)
+        sharing_finish_time = int(self._to_posix(sharing_finish_match.group(1)) * 1000)
+        transcript_start_time = int(self._to_posix(transcript_start_match.group(1)) * 1000)
+        transcript_generated_time = int(self._to_posix(transcript_generated_match.group(1)) * 1000)
+        acs_result_time = int(self._to_posix(acs_result_match.group(1)) * 1000)
+        secret_key_time = int(self._to_posix(secret_key_match.group(1)) * 1000)
+        reconstruct_start_time = int(self._to_posix(reconstruct_start_match.group(1)) * 1000)
 
-    def _parse_workers(self, log):
-        #if search(r'(?:panic|Error)', log) is not None:
-        #    raise ParseError('Worker(s) panicked')
+        # Calculate phase durations
+        result = {
+            "protocol_time": dkg_stop_time - dkg_start_time,
+            "sharing_phase": sharing_finish_time - sharing_start_time,
+            "reply_phase": transcript_start_time - sharing_finish_time,
+            "transcript_computation": transcript_generated_time - transcript_start_time,
+            "acs_phase": acs_result_time - transcript_generated_time,
+            "transcript_verification": secret_key_time - acs_result_time,
+            "reconstruct_phase": reconstruct_start_time - secret_key_time
+        }
 
-        tmp = findall(r'Batch ([^ ]+) contains (\d+) B', log)
-        sizes = {d: int(s) for d, s in tmp}
+        return result
 
-        tmp = findall(r'Batch ([^ ]+) contains sample tx (\d+)', log)
-        samples = {int(s): d for d, s in tmp}
+    def _compute_primary_averages(self, results):
+        assert len(results) == self.committee_size
+        # Check if results is empty
+        if not results:
+            raise ParseError("No valid primary logs to compute averages")
 
-        ip = search(r'booted on (\d+.\d+.\d+.\d+)', log).group(1)
+        # Compute average for each field
+        averages = {
+            "protocol_time": mean([r["protocol_time"] for r in results]),
+            "sharing_phase": mean([r["sharing_phase"] for r in results]),
+            "reply_phase": mean([r["reply_phase"] for r in results]),
+            "transcript_computation": mean([r["transcript_computation"] for r in results]),
+            "acs_phase": mean([r["acs_phase"] for r in results]),
+            "transcript_verification": mean([r["transcript_verification"] for r in results]),
+            "reconstruct_phase": mean([r["reconstruct_phase"] for r in results])
+        }
 
-        return sizes, samples, ip
+        return averages
 
     def _to_posix(self, string):
         x = datetime.fromisoformat(string.replace('Z', '+00:00'))
         return datetime.timestamp(x)
 
-    def _consensus_throughput(self):
-        if not self.commits:
-            return 0, 0, 0
-        start, end = min(self.proposals.values()), max(self.commits.values())
-        duration = end - start
-        bytes = sum(self.sizes.values())
-        bps = bytes / duration
-        tps = bps / self.size[0]
-        return tps, bps, duration
-
-    def _consensus_latency(self):
-        latency = [c - self.proposals[d] if d in self.proposals else 0  for d, c in self.commits.items()]
-        return mean(latency)
-
-    def _end_to_end_throughput(self):
-        if not self.commits:
-            return 0, 0, 0
-        start, end = min(self.start), max(self.commits.values())
-        duration = end - start
-        bytes = sum(self.sizes.values())
-        bps = bytes / duration
-        tps = bps / self.size[0]
-        return tps, bps, duration
-
-    def _end_to_end_latency(self):
-        latency = []
-        for sent, received in zip(self.sent_samples, self.received_samples):
-            for tx_id, batch_id in received.items():
-                if batch_id in self.commits:
-                    assert tx_id in sent  # We receive txs that we sent.
-                    start = sent[tx_id]
-                    end = self.commits[batch_id]
-                    latency += [end-start]
-        return mean(latency) if latency else 0
-
     def result(self):
-        # header_size = self.configs[0]['header_size']
-        # max_header_delay = self.configs[0]['max_header_delay']
-        # gc_depth = self.configs[0]['gc_depth']
-        # sync_retry_delay = self.configs[0]['sync_retry_delay']
-        # sync_retry_nodes = self.configs[0]['sync_retry_nodes']
-        # batch_size = self.configs[0]['batch_size']
-        # max_batch_delay = self.configs[0]['max_batch_delay']
-
-        consensus_latency = self._consensus_latency() * 1_000
-        consensus_tps, consensus_bps, _ = self._consensus_throughput()
-        end_to_end_tps, end_to_end_bps, duration = self._end_to_end_throughput()
-        end_to_end_latency = self._end_to_end_latency() * 1_000
-
+        # Format the summary string
         return (
-            # '\n'
-            # '-----------------------------------------\n'
-            # ' SUMMARY:\n'
-            # '-----------------------------------------\n'
-            # ' + CONFIG:\n'
-            # f' Faults: {self.faults} node(s)\n'
-            # f' Committee size: {self.committee_size} node(s)\n'
-            # f' Worker(s) per node: {self.workers} worker(s)\n'
-            # f' Collocate primary and workers: {self.collocate}\n'
-            # f' Input rate: {sum(self.rate):,} tx/s\n'
-            # f' Transaction size: {self.size[0]:,} B\n'
-            # f' Execution time: {round(duration):,} s\n'
-            # '\n'
-            # f' Header size: {header_size:,} B\n'
-            # f' Max header delay: {max_header_delay:,} ms\n'
-            # f' GC depth: {gc_depth:,} round(s)\n'
-            # f' Sync retry delay: {sync_retry_delay:,} ms\n'
-            # f' Sync retry nodes: {sync_retry_nodes:,} node(s)\n'
-            # f' batch size: {batch_size:,} B\n'
-            # f' Max batch delay: {max_batch_delay:,} ms\n'
-            # '\n'
-            ' + RESULTS:\n'
-            f' Consensus TPS: {round(consensus_tps):,} tx/s\n'
-            f' Consensus BPS: {round(consensus_bps):,} B/s\n'
-            f' Consensus latency: {round(consensus_latency):,} ms\n'
             '\n'
-            f' End-to-end TPS: {round(end_to_end_tps):,} tx/s\n'
-            f' End-to-end BPS: {round(end_to_end_bps):,} B/s\n'
-            f' End-to-end latency: {round(end_to_end_latency):,} ms\n'
+            '-----------------------------------------\n'
+            ' SUMMARY:\n'
+            '-----------------------------------------\n'
+            ' + CONFIG:\n'
+            f' Faults: {self.faults} node(s)\n'
+            f' Committee size: {self.committee_size} node(s)\n'
+            f' Delphi delta: {self.delta:,}\n'
+            f' Delphi epsilon: {self.epsilon:,}\n'
+            f' Delphi tri: {self.tri:,}\n'
+            f' AACS kappa: {self.kappa:,}\n'
+            f' DKG Transaction waiting time: {self.trans_waiting_time:,} ms\n'
+            f' Hashrand batch: {self.hashrand_batch:,}\n'
+            f' Hashrand frequency: {self.hashrand_frequency:,} Hz\n'
+            '\n'
+            ' + RESULTS:\n'
+            f' Protocol overall time: {round(self.averages["protocol_time"]):,} ms\n'
+            f' Sharing phase: {round(self.averages["sharing_phase"]):,} ms\n'
+            f' Reply phase: {round(self.averages["reply_phase"]):,} ms\n'
+            f' Transcript computation: {round(self.averages["transcript_computation"]):,} ms\n'
+            f' ACS phase: {round(self.averages["acs_phase"]):,} ms\n'
+            f' Transcript verification: {round(self.averages["transcript_verification"]):,} ms\n'
+            f' Reconstruct phase: {round(self.averages["reconstruct_phase"]):,} ms\n'
             '-----------------------------------------\n'
         )
 
@@ -331,17 +221,13 @@ class LogParser:
     def process(cls, directory, faults=0):
         assert isinstance(directory, str)
 
-        clients = []
-        for filename in sorted(glob(join(directory, '*.log'))):
+        syncer = []
+        for filename in sorted(glob(join(directory, 'syncer.log'))):
             with open(filename, 'r') as f:
-                clients += [f.read()]
+                syncer += [f.read()]
         primaries = []
-        for filename in sorted(glob(join(directory, '*.log'))):
+        for filename in sorted(glob(join(directory, 'primary-*.log'))):
             with open(filename, 'r') as f:
                 primaries += [f.read()]
-        workers = []
-        for filename in sorted(glob(join(directory, '*.log'))):
-            with open(filename, 'r') as f:
-                workers += [f.read()]
 
-        return cls(clients, primaries, workers, faults=faults)
+        return cls(syncer, primaries, faults=faults)

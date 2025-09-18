@@ -9,30 +9,26 @@ from benchmark.instance import InstanceManager
 from benchmark.remote import Bench, BenchError
 from benchmark.utils import PathMaker
 
-nodes = 10
+nodes = 4
 @task
 def local(ctx, debug=True):
     ''' Run benchmarks on localhost '''
     bench_params = {
         'faults': 0,
         'nodes': nodes,
-        'workers': 1,
-        'rate': 50_000,
-        'tx_size': 512,
-        'duration': 16,
+        'duration': 8,
     }
-    node_params = {
-        'header_size': 1_000,  # bytes
-        'max_header_delay': 200,  # ms
-        'gc_depth': 50,  # rounds
-        'sync_retry_delay': 10_000,  # ms
-        'sync_retry_nodes': 3,  # number of nodes
-        'batch_size': 500_000,  # bytes
-        'max_batch_delay': 200  # ms
+    dkg_params = {
+        'delta': 10,
+        'epsilon': 1,
+        'tri': 100000,
+        'hr_batch': 40,
+        'hr_freq': 20,
+        'trans_delay': 500 # ms
     }
     try:
-        ret = LocalBench(bench_params, node_params).run(debug)
-        #print(ret.result())
+        ret = LocalBench(bench_params, dkg_params).run(debug)
+        print(ret.result())
     except BenchError as e:
         Print.error(e)
 

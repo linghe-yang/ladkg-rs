@@ -26,10 +26,10 @@ class CommandMaker:
         return f'./node generate_keys --filename {filename}'
 
     @staticmethod
-    def generate_config_files(bport, rbc_bport, dkg_bport, drb_bport, client_bport, client_run_port, num_nodes):
+    def generate_config_files(bport, rbc_bport, dkg_bport, drb_bport, client_bport, client_run_port, num_nodes, params):
         return (
             f'./genconfig --blocksize 100 --delay 100 --base_port {bport} --rbc_base_port {rbc_bport} --dkg_base_port {dkg_bport} --drb_base_port {drb_bport} --client_base_port {client_bport} '
-            f'--NumNodes {num_nodes} --target ./configs --client_run_port {client_run_port} --local true --delta 10 --epsilon 1 --tri 100000 --expo 2 --hashrand_batch 40 --hashrand_freq 20 --trans_delay 500'
+            f'--NumNodes {num_nodes} --target ./configs --client_run_port {client_run_port} --local true --delta {params.delta} --epsilon {params.epsilon} --tri {params.tri} --expo 2 --hashrand_batch {params.hr_batch} --hashrand_freq {params.hr_freq} --trans_delay {params.trans_delay}'
             )
 
     @staticmethod

@@ -197,21 +197,10 @@ class BenchParameters:
                 raise ConfigError('Missing or invalid number of nodes')
             self.nodes = [int(x) for x in nodes]
 
-            rate = json['rate']
-            rate = rate if isinstance(rate, list) else [rate]
-            if not rate:
-                raise ConfigError('Missing input rate')
-            self.rate = [int(x) for x in rate]
-
-            
-            self.workers = int(json['workers'])
-
             if 'collocate' in json:
                 self.collocate = bool(json['collocate'])
             else:
                 self.collocate = True
-
-            self.tx_size = int(json['tx_size'])
            
             self.duration = int(json['duration'])
 
@@ -224,6 +213,16 @@ class BenchParameters:
 
         if min(self.nodes) <= self.faults:
             raise ConfigError('There should be more nodes than faults')
+
+
+class DKGParameters:
+    def __init__(self, json):
+        self.delta = int(json['delta'])
+        self.epsilon = int(json['epsilon'])
+        self.tri = int(json['tri'])
+        self.hr_batch = int(json['hr_batch'])
+        self.hr_freq = int(json['hr_freq'])
+        self.trans_delay = int(json['trans_delay'])
 
 
 class PlotParameters:

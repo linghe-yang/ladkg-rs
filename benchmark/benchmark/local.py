@@ -6,7 +6,7 @@ from random import random
 from time import sleep
 
 from benchmark.commands import CommandMaker
-from benchmark.config import Key, LocalCommittee, NodeParameters, BenchParameters, ConfigError
+from benchmark.config import Key, LocalCommittee, NodeParameters, BenchParameters, ConfigError, DKGParameters
 from benchmark.logs import LogParser, ParseError
 from benchmark.utils import Print, BenchError, PathMaker
 
@@ -19,10 +19,10 @@ class LocalBench:
     cl_bport = 10000
     cl_rport = 15000
 
-    def __init__(self, bench_parameters_dict, node_parameters_dict):
+    def __init__(self, bench_parameters_dict, dkg_params):
         try:
             self.bench_parameters = BenchParameters(bench_parameters_dict)
-            self.node_parameters = NodeParameters(node_parameters_dict)
+            self.dkg_params = DKGParameters(dkg_params)
         except ConfigError as e:
             raise BenchError('Invalid nodes or bench parameters', e)
 
@@ -31,7 +31,7 @@ class LocalBench:
 
     def _background_run(self, command, log_file):
         name = splitext(basename(log_file))[0]
-        cmd = f'{command} > {log_file}'
+        cmd = f'{command} 2> {log_file}'
         # print("Command running: {}", command)
         # print(log_file)
         try:
@@ -55,7 +55,7 @@ class LocalBench:
 
         try:
             Print.info('Setting up testbed...')
-            nodes, rate = self.nodes[0], self.rate[0]
+            nodes = self.nodes[0]
 
             # Cleanup all files.
             cmd = f'{CommandMaker.clean_logs()} ; {CommandMaker.cleanup()}'
@@ -73,7 +73,7 @@ class LocalBench:
 
             # Generate the configuration files
             cmd = CommandMaker.generate_config_files(self.BASE_PORT, self.RBC_BASE_PORT, self.DKG_BASE_PORT,
-                                                     self.DRB_BASE_PORT, self.cl_bport, self.cl_rport, nodes)
+                                                     self.DRB_BASE_PORT, self.cl_bport, self.cl_rport, nodes, self.dkg_params)
             self._background_run(cmd, "err.log")
 
             sleep(2)
@@ -98,8 +98,13 @@ class LocalBench:
                 log_file = PathMaker.primary_log_file(i)
                 self._background_run(cmd, log_file)
 
+            Print.info(f'Running benchmark ({self.duration} sec)...')
             sleep(self.duration)
             self._kill_nodes()
+
+            # Parse logs and return the parser.
+            Print.info('Parsing logs...')
+            return LogParser.process(PathMaker.logs_path(), faults=self.faults)
 
 
 
@@ -118,13 +123,11 @@ class LocalBench:
             #         self._background_run(cmd, log_file)
 
             # # Wait for all transactions to be processed.
-            # Print.info(f'Running benchmark ({self.duration} sec)...')
+
             # sleep(self.duration)
             # self._kill_nodes()
 
-            # # Parse logs and return the parser.
-            # Print.info('Parsing logs...')
-            # return LogParser.process(PathMaker.logs_path(), faults=self.faults)
+
 
         except (subprocess.SubprocessError, ParseError) as e:
             self._kill_nodes()
