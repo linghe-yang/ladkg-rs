@@ -56,7 +56,7 @@ class LocalBench:
 
         try:
             Print.info('Setting up testbed...')
-            nodes = self.nodes[0]
+            nodes = self.nodes
 
             # Cleanup all files.
             cmd = f'{CommandMaker.clean_logs()} ; {CommandMaker.cleanup()}'
@@ -74,7 +74,7 @@ class LocalBench:
 
             # Generate the configuration files
             cmd = CommandMaker.generate_config_files(self.BASE_PORT, self.RBC_BASE_PORT, self.DKG_BASE_PORT,
-                                                     self.DRB_BASE_PORT, self.cl_bport, self.cl_rport, nodes, self.dkg_params)
+                                                     self.DRB_BASE_PORT, self.cl_bport, self.cl_rport, nodes, self.dkg_params, self.kappa)
             self._background_run(cmd, "err.log")
             time.sleep(1)
 
@@ -109,7 +109,16 @@ class LocalBench:
 
             # Parse logs and return the parser.
             Print.info('Parsing logs...')
-            return LogParser.process(PathMaker.logs_path(), faults=self.faults)
+            # return LogParser.process(PathMaker.logs_path(), faults=self.faults)
+            logger =  LogParser.process(PathMaker.logs_path(), faults=self.faults)
+
+            logger.print(PathMaker.result_file(
+                self.faults,
+                nodes,
+                self.dkg_params.trans_delay,
+                self.kappa
+            ))
+            return logger
 
 
 

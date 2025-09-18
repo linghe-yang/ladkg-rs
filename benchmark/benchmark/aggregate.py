@@ -9,6 +9,9 @@ import os
 
 from benchmark.utils import PathMaker
 
+from pathlib import Path
+import re
+
 
 class Setup:
     def __init__(self, faults, nodes, workers, collocate, rate, tx_size):
@@ -50,133 +53,148 @@ class Setup:
         return cls(faults, nodes, workers, collocate, rate, tx_size)
 
 
+# class Result:
+#     def __init__(self, mean_tps, mean_latency, std_tps=0, std_latency=0):
+#         self.mean_tps = mean_tps
+#         self.mean_latency = mean_latency
+#         self.std_tps = std_tps
+#         self.std_latency = std_latency
+#
+#     def __str__(self):
+#         return(
+#             f' TPS: {self.mean_tps} +/- {self.std_tps} tx/s\n'
+#             f' Latency: {self.mean_latency} +/- {self.std_latency} ms\n'
+#         )
+#
+#     @classmethod
+#     def from_str(cls, raw):
+#         tps = int(search(r'End-to-end TPS: (\d+)', raw).group(1))
+#         latency = int(search(r'End-to-end latency: (\d+)', raw).group(1))
+#         return cls(tps, latency)
+#
+#     @classmethod
+#     def aggregate(cls, results):
+#         if len(results) == 1:
+#             return results[0]
+#
+#         mean_tps = round(mean([x.mean_tps for x in results]))
+#         mean_latency = round(mean([x.mean_latency for x in results]))
+#         std_tps = round(stdev([x.mean_tps for x in results]))
+#         std_latency = round(stdev([x.mean_latency for x in results]))
+#         return cls(mean_tps, mean_latency, std_tps, std_latency)
+
+
 class Result:
-    def __init__(self, mean_tps, mean_latency, std_tps=0, std_latency=0):
-        self.mean_tps = mean_tps
-        self.mean_latency = mean_latency
-        self.std_tps = std_tps
-        self.std_latency = std_latency
-
-    def __str__(self):
-        return(
-            f' TPS: {self.mean_tps} +/- {self.std_tps} tx/s\n'
-            f' Latency: {self.mean_latency} +/- {self.std_latency} ms\n'
-        )
-
-    @classmethod
-    def from_str(cls, raw):
-        tps = int(search(r'End-to-end TPS: (\d+)', raw).group(1))
-        latency = int(search(r'End-to-end latency: (\d+)', raw).group(1))
-        return cls(tps, latency)
-
-    @classmethod
-    def aggregate(cls, results):
-        if len(results) == 1:
-            return results[0]
-
-        mean_tps = round(mean([x.mean_tps for x in results]))
-        mean_latency = round(mean([x.mean_latency for x in results]))
-        std_tps = round(stdev([x.mean_tps for x in results]))
-        std_latency = round(stdev([x.mean_latency for x in results]))
-        return cls(mean_tps, mean_latency, std_tps, std_latency)
+    def __init__(self, faults, committee_size, kappa, transaction_waiting_time,
+                 dkg_overall_time, sharing_phase, reply_phase, transcript_computation,
+                 acs_phase, transcript_verification, reconstruct_phase):
+        self.faults = faults
+        self.committee_size = committee_size
+        self.kappa = kappa
+        self.transaction_waiting_time = transaction_waiting_time
+        self.dkg_overall_time = dkg_overall_time
+        self.sharing_phase = sharing_phase
+        self.reply_phase = reply_phase
+        self.transcript_computation = transcript_computation
+        self.acs_phase = acs_phase
+        self.transcript_verification = transcript_verification
+        self.reconstruct_phase = reconstruct_phase
 
 
 class LogAggregator:
-    def __init__(self, max_latencies):
-        assert isinstance(max_latencies, list)
-        assert all(isinstance(x, int) for x in max_latencies)
-
-        self.max_latencies = max_latencies
-
-        data = ''
-        for filename in glob(join(PathMaker.results_path(), '*.txt')):
-            with open(filename, 'r') as f:
-                data += f.read()
-
-        records = defaultdict(list)
-        for chunk in data.replace(',', '').split('SUMMARY')[1:]:
-            if chunk:
-                records[Setup.from_str(chunk)] += [Result.from_str(chunk)]
-
-        self.records = {k: Result.aggregate(v) for k, v in records.items()}
+    def __init__(self, faults):
+        self.faults = faults
+        self.results = self.aggregate_results()
 
     def print(self):
-        if not os.path.exists(PathMaker.plots_path()):
-            os.makedirs(PathMaker.plots_path())
+        for r in self.results:
+            print(r.faults)
+            print(r.committee_size)
+            print(r.kappa)
+            print(r.transaction_waiting_time)
+            print(r.dkg_overall_time)
+            print(r.sharing_phase)
+            print(r.reply_phase)
+            print(r.transcript_computation)
+            print(r.acs_phase)
+            print(r.transcript_verification)
+            print(r.reconstruct_phase)
 
-        results = [
-            self._print_latency(),
-            self._print_tps(scalability=False),
-            self._print_tps(scalability=True),
-        ]
-        for name, records in results:
-            for setup, values in records.items():
-                data = '\n'.join(
-                    f' Variable value: X={x}\n{y}' for x, y in values
-                )
-                string = (
-                    '\n'
-                    '-----------------------------------------\n'
-                    ' RESULTS:\n'
-                    '-----------------------------------------\n'
-                    f'{setup}'
-                    '\n'
-                    f'{data}'
-                    '-----------------------------------------\n'
-                )
 
-                max_lat = setup.max_latency
-                filename = PathMaker.agg_file(
-                    name,
-                    setup.faults,
-                    setup.nodes,
-                    setup.workers,
-                    setup.collocate,
-                    setup.rate,
-                    setup.tx_size,
-                    max_latency=None if max_lat == 'any' else max_lat,
-                )
-                with open(filename, 'w') as f:
-                    f.write(string)
+    def aggregate_results(self):
+        # Dictionary to store results grouped by CONFIG key
+        config_groups = {}
 
-    def _print_latency(self):
-        records = deepcopy(self.records)
-        organized = defaultdict(list)
-        for setup, result in records.items():
-            rate = setup.rate
-            setup.rate = 'any'
-            organized[setup] += [(result.mean_tps, result, rate)]
+        # Regex to parse filename
+        filename_pattern = re.compile(r'bench-(\d+)-(\d+)-(\d+)-(\d+)\.txt')
 
-        for setup, results in list(organized.items()):
-            results.sort(key=lambda x: x[2])
-            organized[setup] = [(x, y) for x, y, _ in results]
+        # Read files matching the faults parameter
+        for filename in glob(join(PathMaker.results_path(), f'bench-{self.faults}-*.txt')):
+            match = filename_pattern.search(filename)
+            if not match:
+                continue
+            faults, committee_size, waiting_time, kappa = map(int, match.groups())
 
-        return 'latency', organized
+            with open(filename, 'r') as f:
+                data = f.read()
 
-    def _print_tps(self, scalability):
-        records = deepcopy(self.records)
-        organized = defaultdict(list)
-        for max_latency in self.max_latencies:
-            for setup, result in records.items():
-                setup = deepcopy(setup)
-                if result.mean_latency <= max_latency:
-                    setup.rate = 'any'
-                    setup.max_latency = max_latency
-                    if scalability:
-                        variable = setup.workers
-                        setup.workers = 'x'
-                    else:
-                        variable = setup.nodes
-                        setup.nodes = 'x'
+            # Split data into SUMMARY blocks
+            summaries = data.split('-----------------------------------------')[:-1]
+            for summary in summaries:
+                if '+ CONFIG:' not in summary or '+ RESULTS:' not in summary:
+                    continue
 
-                    new_point = all(variable != x[0] for x in organized[setup])
-                    highest_tps = False
-                    for v, r in organized[setup]:
-                        if result.mean_tps > r.mean_tps and variable == v:
-                            organized[setup].remove((v, r))
-                            highest_tps = True
-                    if new_point or highest_tps:
-                        organized[setup] += [(variable, result)]
+                # Extract CONFIG
+                config_lines = summary.split('+ CONFIG:')[1].split('+ RESULTS:')[0].strip().split('\n')
+                config = {}
+                for line in config_lines:
+                    if ':' in line:
+                        key, value = line.split(':', 1)
+                        config[key.strip()] = value.strip()
 
-        [v.sort(key=lambda x: x[0]) for v in organized.values()]
-        return 'tps', organized
+                # Extract RESULTS
+                result_lines = summary.split('+ RESULTS:')[1].strip().split('\n')
+                results = {}
+                for line in result_lines:
+                    if ':' in line:
+                        key, value = line.split(':', 1)
+                        results[key.strip()] = float(value.split()[0])  # Extract numeric value
+
+                # Create config key for grouping
+                config_key = (faults, committee_size, int(config['AACS kappa'].split()[0]),
+                            int(config['DKG Transaction waiting time'].split()[0]))
+
+                if config_key not in config_groups:
+                    config_groups[config_key] = []
+                config_groups[config_key].append(results)
+
+        # Aggregate results by computing averages
+        aggregated_results = []
+        for config_key, result_list in config_groups.items():
+            faults, committee_size, kappa, waiting_time = config_key
+            n = len(result_list)
+            if n == 0:
+                continue
+
+            # Compute averages
+            avg_results = {}
+            for key in result_list[0].keys():
+                avg_results[key] = sum(r[key] for r in result_list) / n
+
+            # Create Result object
+            result = Result(
+                faults=faults,
+                committee_size=committee_size,
+                kappa=kappa,
+                transaction_waiting_time=waiting_time,
+                dkg_overall_time=avg_results['DKG overall time'],
+                sharing_phase=avg_results['Sharing phase'],
+                reply_phase=avg_results['Reply phase'],
+                transcript_computation=avg_results['Transcript computation'],
+                acs_phase=avg_results['ACS phase'],
+                transcript_verification=avg_results['Transcript verification'],
+                reconstruct_phase=avg_results['Reconstruct phase']
+            )
+            aggregated_results.append(result)
+
+        return aggregated_results

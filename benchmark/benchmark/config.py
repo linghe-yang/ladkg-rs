@@ -191,11 +191,12 @@ class BenchParameters:
         try:
             self.faults = int(json['faults'])
 
-            nodes = json['nodes']
-            nodes = nodes if isinstance(nodes, list) else [nodes]
-            if not nodes or any(x <= 1 for x in nodes):
-                raise ConfigError('Missing or invalid number of nodes')
-            self.nodes = [int(x) for x in nodes]
+            self.nodes = int(json['nodes'])
+
+            if 'kappa' in json:
+                self.kappa = int(json['kappa'])
+            else:
+                self.kappa = int(self.nodes / 3)+ 1
 
             if 'collocate' in json:
                 self.collocate = bool(json['collocate'])
@@ -211,7 +212,7 @@ class BenchParameters:
         except ValueError:
             raise ConfigError('Invalid parameters type')
 
-        if min(self.nodes) <= self.faults:
+        if self.nodes <= self.faults:
             raise ConfigError('There should be more nodes than faults')
 
 
@@ -225,12 +226,11 @@ class DKGParameters:
         self.trans_delay = int(json['trans_delay'])
 
 
+
 class PlotParameters:
     def __init__(self, json):
         try:
-            faults = json['faults']
-            faults = faults if isinstance(faults, list) else [faults]
-            self.faults = [int(x) for x in faults] if faults else [0]
+            self.faults = int(json['faults'])
 
             nodes = json['nodes']
             nodes = nodes if isinstance(nodes, list) else [nodes]
@@ -238,24 +238,7 @@ class PlotParameters:
                 raise ConfigError('Missing number of nodes')
             self.nodes = [int(x) for x in nodes]
 
-            workers = json['workers']
-            workers = workers if isinstance(workers, list) else [workers]
-            if not workers:
-                raise ConfigError('Missing number of workers')
-            self.workers = [int(x) for x in workers]
-
-            if 'collocate' in json:
-                self.collocate = bool(json['collocate'])
-            else:
-                self.collocate = True
-
-            self.tx_size = int(json['tx_size'])
-
-            max_lat = json['max_latency']
-            max_lat = max_lat if isinstance(max_lat, list) else [max_lat]
-            if not max_lat:
-                raise ConfigError('Missing max latency')
-            self.max_latency = [int(x) for x in max_lat]
+            self.kappa = int(json['kappa'])
 
         except KeyError as e:
             raise ConfigError(f'Malformed bench parameters: missing key {e}')
@@ -263,10 +246,4 @@ class PlotParameters:
         except ValueError:
             raise ConfigError('Invalid parameters type')
 
-        if len(self.nodes) > 1 and len(self.workers) > 1:
-            raise ConfigError(
-                'Either the "nodes" or the "workers can be a list (not both)'
-            )
 
-    def scalability(self):
-        return len(self.workers) > 1
