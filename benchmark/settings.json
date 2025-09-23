@@ -1,18 +1,16 @@
 {
     "key": {
         "name": "aws",
-        "path": "/home/akhil/.ssh/aws"
+        "path": "/root/.ssh/aws"
     },
-    "port": 8500,
-    "client_base_port": 9000,
-    "client_run_port": 9500,
+    "port": 5000,
     "repo": {
-        "name": "delphi-rs",
-        "url": "https://github.com/akhilsb/delphi-rs",
+        "name": "ladkg-rs",
+        "url": "https://github.com/linghe-yang/ladkg-rs.git",
         "branch": "master"
     },
     "instances": {
         "type": "t2.micro",
-        "regions": ["us-east-1","us-east-2","us-west-1","us-west-2","ca-central-1", "eu-west-1", "ap-southeast-1", "ap-northeast-1"]
+        "regions": ["us-east-1"]
     }
 }

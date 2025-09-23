@@ -17,8 +17,8 @@ class AWSError(Exception):
 
 
 class InstanceManager:
-    INSTANCE_NAME = 'dag-node'
-    SECURITY_GROUP_NAME = 'dag'
+    INSTANCE_NAME = 'dkg-node'
+    SECURITY_GROUP_NAME = 'dkg'
 
     def __init__(self, settings):
         assert isinstance(settings, Settings)
@@ -69,7 +69,7 @@ class InstanceManager:
 
     def _create_security_group(self, client):
         client.create_security_group(
-            Description='HotStuff node',
+            Description='DKG node',
             GroupName=self.SECURITY_GROUP_NAME,
         )
 
@@ -95,25 +95,40 @@ class InstanceManager:
                     'ToPort': self.settings.base_port + 2_000,
                     'IpRanges': [{
                         'CidrIp': '0.0.0.0/0',
-                        'Description': 'Dag port',
+                        'Description': 'Dkg port',
                     }],
                     'Ipv6Ranges': [{
                         'CidrIpv6': '::/0',
-                        'Description': 'Dag port',
+                        'Description': 'Dkg port',
                     }],
                 }
             ]
         )
 
     def _get_ami(self, client):
-        # The AMI changes with regions.
         response = client.describe_images(
-            Filters=[{
-                'Name': 'description',
-                'Values': ['Canonical, Ubuntu, 20.04 LTS, amd64 focal image build on 2023-10-25']
-            }]
+            Filters=[
+                {
+                    'Name': 'description',
+                    'Values': ['Canonical, Ubuntu, 20.04*']  # Broader filter to match variations
+                },
+                # {
+                #     'Name': 'owner-id',
+                #     'Values': ['099720109477']  # Canonical's AWS account ID
+                # }
+            ]
         )
+        print(response)
         return response['Images'][0]['ImageId']
+        # print("client:", client)
+        # # The AMI changes with regions.
+        # response = client.describe_images(
+        #     Filters=[{
+        #         'Name': 'description',
+        #         'Values': ['Canonical, Ubuntu, 20.04 LTS, amd64 focal image build on *']
+        #     }]
+        # )
+        # return response['Images'][0]['ImageId']
 
     def create_instances(self, instances):
         assert isinstance(instances, int) and instances > 0
@@ -153,7 +168,7 @@ class InstanceManager:
                         'DeviceName': '/dev/sda1',
                         'Ebs': {
                             'VolumeType': 'gp2',
-                            'VolumeSize': 200,
+                            'VolumeSize': 8,
                             'DeleteOnTermination': True
                         }
                     }],

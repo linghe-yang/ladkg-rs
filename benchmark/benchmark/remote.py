@@ -10,8 +10,9 @@ from math import ceil
 from copy import deepcopy
 import subprocess
 import time
-
-from benchmark.config import Committee, Key, NodeParameters, BenchParameters, ConfigError
+import os
+from concurrent.futures import ThreadPoolExecutor
+from benchmark.config import Committee, Key, NodeParameters, BenchParameters, ConfigError, DKGParameters
 from benchmark.utils import BenchError, Print, PathMaker, progress_bar
 from benchmark.commands import CommandMaker
 from benchmark.logs import LogParser, ParseError
@@ -32,6 +33,12 @@ class ExecutionError(Exception):
 
 
 class Bench:
+    BASE_PORT = 6000
+    RBC_BASE_PORT = 6001
+    DKG_BASE_PORT = 6002
+    DRB_BASE_PORT = 6003
+    cl_bport = 5000
+    cl_rport = 5001
     def __init__(self, ctx):
         self.manager = InstanceManager.make()
         self.settings = self.manager.settings
@@ -107,11 +114,10 @@ class Bench:
     def _select_hosts(self, bench_parameters):
         # Collocate the primary and its workers on the same machine.
         if bench_parameters.collocate:
-            nodes = max(bench_parameters.nodes)
+            nodes = bench_parameters.nodes + 1
 
             # Ensure there are enough hosts.
             hosts = self.manager.hosts()
-            print("{} {}",sum(len(x) for x in hosts.values()), nodes)
             if sum(len(x) for x in hosts.values()) < nodes:
                 return []
 
@@ -123,7 +129,7 @@ class Bench:
         # Spawn the primary and each worker on a different machine. Each
         # authority runs in a single data center.
         else:
-            primaries = max(bench_parameters.nodes)
+            primaries = bench_parameters.nodes
 
             # Ensure there are enough hosts.
             hosts = self.manager.hosts()
@@ -147,28 +153,124 @@ class Bench:
         output = c.run(cmd, hide=True)
         self._check_stderr(output)
 
+    def _background_run_local(self, command, log_file):
+        name = splitext(basename(log_file))[0]
+        cmd = f'{command} 2> {log_file}'
+        try:
+            subprocess.run(['tmux', 'new', '-d', '-s', name, cmd], check=True)
+        except subprocess.SubprocessError as e:
+            raise BenchError('Failed to kill testbed', e)
+
+    # def _update(self, hosts, collocate):
+    #     if collocate:
+    #         ips = list(set(hosts))
+    #     else:
+    #         ips = list(set([x for y in hosts for x in y]))
+    #
+    #     Print.info(
+    #         f'Updating {len(ips)} machines (branch "{self.settings.branch}")...'
+    #     )
+    #     cmd = [
+    #         f'(cd {self.settings.repo_name} && git fetch -f)',
+    #         f'(cd {self.settings.repo_name} && git checkout -f {self.settings.branch})',
+    #         f'(cd {self.settings.repo_name} && git pull -f)',
+    #         'source $HOME/.cargo/env',
+    #         'sudo apt install pkg-config && sudo apt install libssl-dev',
+    #         f'(cd {self.settings.repo_name} && {CommandMaker.compile()})',
+    #         CommandMaker.alias_binaries(
+    #             f'./{self.settings.repo_name}/target/release/'
+    #         )
+    #     ]
+    #     g = Group(*ips, user='ubuntu', connect_kwargs=self.connect)
+    #     print(g.run(' && '.join(cmd), hide=True))
+
     def _update(self, hosts, collocate):
+        # Step 1: Determine unique IPs
         if collocate:
             ips = list(set(hosts))
         else:
             ips = list(set([x for y in hosts for x in y]))
 
-        Print.info(
-            f'Updating {len(ips)} machines (branch "{self.settings.branch}")...'
-        )
-        cmd = [
-            f'(cd {self.settings.repo_name} && git fetch -f)',
-            f'(cd {self.settings.repo_name} && git checkout -f {self.settings.branch})',
-            f'(cd {self.settings.repo_name} && git pull -f)',
-            'source $HOME/.cargo/env',
-            'sudo apt install pkg-config && sudo apt install libssl-dev',
-            f'(cd {self.settings.repo_name} && {CommandMaker.compile()})',
-            CommandMaker.alias_binaries(
-                f'./{self.settings.repo_name}/target/release/'
-            )
-        ]
+        Print.info(f'Testing SSH connectivity for {len(ips)} machines...')
+
+        # Step 2: Test SSH connectivity
         g = Group(*ips, user='ubuntu', connect_kwargs=self.connect)
-        print(g.run(' && '.join(cmd), hide=True))
+        test_cmd = 'echo "test"'
+        failed_ips = []
+        try:
+            results = g.run(test_cmd, hide=True, warn=True, timeout=10)
+            for ip, result in results.items():
+                if result.exited != 0 or result.stderr:
+                    failed_ips.append((ip, result.stderr or f'Non-zero exit code: {result.exited}'))
+        except GroupException as e:
+            for ip, result in e.result.items():
+                if isinstance(result, Exception):
+                    failed_ips.append((ip, str(result)))
+                elif result.exited != 0 or result.stderr:
+                    failed_ips.append((ip, result.stderr or f'Non-zero exit code: {result.exited}'))
+
+        if failed_ips:
+            for ip, error in failed_ips:
+                Print.warn(f'SSH connection failed on {ip}: {error}')
+            raise BenchError(
+                f'SSH connectivity test failed for {len(failed_ips)}/{len(ips)} instances',
+                Exception('SSH connectivity issues')
+            )
+        Print.info(f'Successfully connected to all {len(ips)} instances')
+
+        Print.info(f'Updating {len(ips)} machines with local node binary...')
+        # Step 3: Clean up local files
+        Print.info('Cleaning up local files...')
+        cmd = f'{CommandMaker.clean_logs()} ; {CommandMaker.cleanup()}'
+        subprocess.run([cmd], shell=True, stderr=subprocess.DEVNULL)
+        time.sleep(0.5)  # Allow time for cleanup
+        # Step 4: Compile locally
+        Print.info('Compiling locally...')
+        try:
+            cmd = CommandMaker.compile_remote().split()
+            subprocess.run(cmd, check=True, cwd=PathMaker.node_crate_path())
+        except subprocess.CalledProcessError as e:
+            raise BenchError(f'Failed to compile locally: {e.stderr}', e)
+        except Exception as e:
+            raise BenchError('Unexpected error during local compilation', e)
+        # Step 5: Upload node binary to remote instances in parallel
+        local_repo_path = os.path.expanduser(f'~/{self.settings.repo_name}')
+        binary_dir = os.path.join(local_repo_path, 'target', 'release')
+        remote_binary_dir = f'/home/ubuntu/{self.settings.repo_name}/target/release/'
+        binary = 'node'
+        local_path = os.path.join(binary_dir, binary)
+
+        if not os.path.exists(local_path):
+            raise BenchError(f'Binary {local_path} not found after compilation', None)
+
+        def upload_binary(ip):
+            """Upload node binary to a single instance."""
+            c = Connection(ip, user='ubuntu', connect_kwargs=self.connect)
+            try:
+                # Ensure remote directory exists
+                c.run(f'mkdir -p {remote_binary_dir}', hide=True)
+                # Upload node binary
+                remote_path = f'{remote_binary_dir}{binary}'
+                c.put(local_path, remote_path)
+                # Set executable permissions
+                c.run(f'chmod +x {remote_path}', hide=True)
+                # Create binary alias
+                c.run(
+                    CommandMaker.alias_binaries(f'./{self.settings.repo_name}/target/release/'),
+                    hide=True
+                )
+            except Exception as e:
+                raise BenchError(f'Failed to upload binary to {ip}', e)
+
+        Print.info(f'Uploading node binary to {len(ips)} instances in parallel...')
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            futures = [executor.submit(upload_binary, ip) for ip in ips]
+            progress = progress_bar(futures, prefix='Uploading node binary:')
+            for future in progress:
+                future.result()  # Wait for each task to complete and raise any exceptions
+
+        Print.info(f'Successfully updated {len(ips)} machines with local node binary')
+
 
     def _config(self, hosts, node_parameters, bench_parameters):
         Print.info('Generating configuration files...')
@@ -500,21 +602,21 @@ class Bench:
         Print.info('Parsing logs and computing performance...')
         return LogParser.process(PathMaker.logs_path(), faults=faults)
 
-    def run(self, bench_parameters_dict, node_parameters_dict, debug=False):
+    def run(self, bench_parameters_dict, dkg_params, debug=False):
         assert isinstance(debug, bool)
         Print.heading('Starting remote benchmark')
         try:
             bench_parameters = BenchParameters(bench_parameters_dict)
-            node_parameters = NodeParameters(node_parameters_dict)
+            dkg_params = DKGParameters(dkg_params)
         except ConfigError as e:
             raise BenchError('Invalid nodes or bench parameters', e)
 
         # Select which hosts to use.
         selected_hosts = self._select_hosts(bench_parameters)
-        print(selected_hosts)
         if not selected_hosts:
             Print.warn('There are not enough instances available')
             return
+
 
         # Update nodes.
         try:
@@ -523,14 +625,29 @@ class Bench:
             e = FabricError(e) if isinstance(e, GroupException) else e
             raise BenchError('Failed to update nodes', e)
 
-        # Upload all configuration files.
-        try:
-            committee = self._config(
-                selected_hosts, node_parameters, bench_parameters
-            )
-        except (subprocess.SubprocessError, GroupException) as e:
-            e = FabricError(e) if isinstance(e, GroupException) else e
-            raise BenchError('Failed to configure nodes', e)
+        # Create alias for the client and nodes binary.
+        cmd = CommandMaker.alias_binaries(PathMaker.binary_path())
+        subprocess.run([cmd], shell=True)
+
+        host_str = " ".join(selected_hosts)
+        print("hoststr=",host_str)
+
+        # Generate the configuration files
+        cmd = CommandMaker.generate_config_files_remote(self.BASE_PORT, self.RBC_BASE_PORT, self.DKG_BASE_PORT,
+                                                 self.DRB_BASE_PORT, self.cl_bport, self.cl_rport,
+                                                 bench_parameters.nodes,
+                                                 dkg_params, bench_parameters.kappa,host_str)
+        self._background_run_local(cmd, "err.log")
+        time.sleep(1)
+
+        # # Upload all configuration files.
+        # try:
+        #     committee = self._config(
+        #         selected_hosts, node_parameters, bench_parameters
+        #     )
+        # except (subprocess.SubprocessError, GroupException) as e:
+        #     e = FabricError(e) if isinstance(e, GroupException) else e
+        #     raise BenchError('Failed to configure nodes', e)
 
         # Run benchmarks.
         # for n in bench_parameters.nodes:

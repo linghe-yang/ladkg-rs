@@ -347,14 +347,21 @@ impl Context {
         Ok(())
     }
 
-    async fn handle_acs_result(&mut self, res: Vec<Transcript>) -> Result<(), anyhow::Error> {
+    async fn handle_acs_result(&mut self, mut res: Vec<Transcript>) -> Result<(), anyhow::Error> {
+        sort_transcripts(&mut res);
         info!("Node {}: ACS output received", self.myid);
         let mut decided_trans = Vec::new();
+        let target_count = self.num_faults + 1;
+
         for trans in res.iter() {
+            if decided_trans.len() >= target_count {
+                break;
+            }
             if trans.verify(&self.sig_pks, &self.pks, self.num_nodes) {
                 decided_trans.push(trans.clone());
             }
         }
+
 
         for trans in decided_trans.iter() {
             if let std::collections::hash_map::Entry::Vacant(e) =
@@ -374,6 +381,7 @@ impl Context {
                 if let Ok((x, _)) = try_decrypt(pk, &self.sk, my_supple) {
                     e.insert(x);
                 } else {
+                    //this should not happen.
                     panic!("Supplementary share decrypt failed");
                 }
             }
@@ -594,6 +602,13 @@ fn find_missing_replicas(vec: &Vec<(Replica, Signature)>, n: usize) -> Vec<Repli
     (0..n).filter(|i| !replicas.contains(i)).collect()
 }
 
+fn sort_transcripts(res: &mut Vec<Transcript>) {
+    res.sort_by(|a, b| {
+        let cert_cmp = b.cert.len().cmp(&a.cert.len());
+        cert_cmp.then_with(|| a.id.cmp(&b.id))
+    });
+}
+
 fn gen_hashrand_config(config: &Node) -> HashRandConfig {
     HashRandConfig {
         net_map: config.net_map_drb.clone(),
@@ -631,3 +646,4 @@ pub fn create_thread_safe_rng(seed: u128) -> StdRng {
     full_seed[..16].copy_from_slice(&seed_bytes);
     StdRng::from_seed(full_seed)
 }
+

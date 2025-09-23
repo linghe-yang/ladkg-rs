@@ -9,14 +9,15 @@ from benchmark.instance import InstanceManager
 from benchmark.remote import Bench, BenchError
 from benchmark.utils import PathMaker
 
-nodes = 10
+nodes = 4
 @task
 def local(ctx, debug=True):
+    assert nodes % 3 == 1
     ''' Run benchmarks on localhost '''
     bench_params = {
         'faults': 0,
         'nodes': nodes,
-        'kappa': 6,
+        'kappa': 2,
         'duration': 10,
     }
     dkg_params = {
@@ -68,7 +69,7 @@ def log_v(ctx, debug=True):
 def create(ctx, nodes=nodes):
     ''' Create a testbed'''
     try:
-        InstanceManager.make().create_instances(nodes)
+        InstanceManager.make().create_instances(nodes + 1)
     except BenchError as e:
         Print.error(e)
 
@@ -121,27 +122,23 @@ def install(ctx):
 @task
 def remote(ctx, debug=False):
     ''' Run benchmarks on AWS '''
+    assert nodes % 3 == 1
     bench_params = {
         'faults': 0,
-        'nodes': [160],
-        'workers': 1,
-        'collocate': True,
-        'rate': [10_000, 110_000],
-        'tx_size': 512,
-        'duration': 300,
-        'runs': 2,
+        'nodes': nodes,
+        'kappa': 2,
+        'duration': 10,
     }
-    node_params = {
-        'header_size': 1_000,  # bytes
-        'max_header_delay': 200,  # ms
-        'gc_depth': 50,  # rounds
-        'sync_retry_delay': 10_000,  # ms
-        'sync_retry_nodes': 3,  # number of nodes
-        'batch_size': 500_000,  # bytes
-        'max_batch_delay': 200  # ms
+    dkg_params = {
+        'delta': 10,
+        'epsilon': 1,
+        'tri': 100000,
+        'hr_batch': 40,
+        'hr_freq': 20,
+        'trans_delay': 500  # ms
     }
     try:
-        Bench(ctx).run(bench_params, node_params, debug)
+        Bench(ctx).run(bench_params, dkg_params, debug)
     except BenchError as e:
         Print.error(e)
 

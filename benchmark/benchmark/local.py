@@ -1,13 +1,11 @@
 # Copyright(C) Facebook, Inc. and its affiliates.
 import subprocess
-from datetime import datetime, timedelta
-from math import ceil
-from os.path import basename, splitext
-from random import random
 import time
+from datetime import datetime, timedelta
+from os.path import basename, splitext
 
 from benchmark.commands import CommandMaker
-from benchmark.config import Key, LocalCommittee, NodeParameters, BenchParameters, ConfigError, DKGParameters
+from benchmark.config import BenchParameters, ConfigError, DKGParameters
 from benchmark.logs import LogParser, ParseError
 from benchmark.utils import Print, BenchError, PathMaker
 
@@ -112,35 +110,13 @@ class LocalBench:
             # return LogParser.process(PathMaker.logs_path(), faults=self.faults)
             logger =  LogParser.process(PathMaker.logs_path(), faults=self.faults)
 
-            logger.print(PathMaker.result_file(
-                self.faults,
-                nodes,
-                self.dkg_params.trans_delay,
-                self.kappa
-            ))
+            # logger.print(PathMaker.result_file(
+            #     self.faults,
+            #     nodes,
+            #     self.dkg_params.trans_delay,
+            #     self.kappa
+            # ))
             return logger
-
-
-
-            # # Run the workers (except the faulty ones).
-            # for i, addresses in enumerate(workers_addresses):
-            #     for (id, address) in addresses:
-            #         cmd = CommandMaker.run_worker(
-            #             PathMaker.key_file(i),
-            #             PathMaker.committee_file(),
-            #             PathMaker.db_path(i, id),
-            #             PathMaker.parameters_file(),
-            #             id,  # The worker's id.
-            #             debug=debug
-            #         )
-            #         log_file = PathMaker.worker_log_file(i, id)
-            #         self._background_run(cmd, log_file)
-
-            # # Wait for all transactions to be processed.
-
-            # sleep(self.duration)
-            # self._kill_nodes()
-
 
 
         except (subprocess.SubprocessError, ParseError) as e:
