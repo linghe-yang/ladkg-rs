@@ -16,3 +16,6 @@ rustls = "*"
 fnv = "1"
 rand = "0.6"
 avsss = { package = "avsss", git="https://github.com/linghe-yang/lvss.git"}
+
+[features]
+remote = []

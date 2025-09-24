@@ -128,3 +128,7 @@ args:
           long: hashrand_freq
           help: hashrand_freq for DRB
           takes_value: true
+    - remote_ips:
+          long: remote_ips
+          help: remote ips for ip generation
+          takes_value: true

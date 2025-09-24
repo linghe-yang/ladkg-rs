@@ -1,22 +1,25 @@
 # Copyright(C) Facebook, Inc. and its affiliates.
-from collections import OrderedDict
+import json
+import os
+import subprocess
+import time
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta
+from math import ceil
+from os.path import basename, splitext
+from pathlib import Path
+from time import sleep
+
 from fabric import Connection, ThreadingGroup as Group
 from fabric.exceptions import GroupException
 from paramiko import RSAKey
 from paramiko.ssh_exception import PasswordRequiredException, SSHException
-from os.path import basename, splitext
-from time import sleep
-from math import ceil
-from copy import deepcopy
-import subprocess
-import time
-import os
-from concurrent.futures import ThreadPoolExecutor
-from benchmark.config import Committee, Key, NodeParameters, BenchParameters, ConfigError, DKGParameters
-from benchmark.utils import BenchError, Print, PathMaker, progress_bar
+
 from benchmark.commands import CommandMaker
-from benchmark.logs import LogParser, ParseError
+from benchmark.config import BenchParameters, ConfigError, DKGParameters
 from benchmark.instance import InstanceManager
+from benchmark.logs import LogParser, ParseError
+from benchmark.utils import BenchError, Print, PathMaker, progress_bar
 
 
 class FabricError(Exception):
@@ -39,6 +42,7 @@ class Bench:
     DRB_BASE_PORT = 6003
     cl_bport = 5000
     cl_rport = 5001
+
     def __init__(self, ctx):
         self.manager = InstanceManager.make()
         self.settings = self.manager.settings
@@ -46,7 +50,7 @@ class Bench:
             ctx.connect_kwargs.pkey = RSAKey.from_private_key_file(
                 self.manager.settings.key_path
             )
-            #ctx.connect_kwargs = {"key_filename": "/home/akhil/.ssh/aws", "passphrase": ""}
+            # ctx.connect_kwargs = {"key_filename": "/home/akhil/.ssh/aws", "passphrase": ""}
             self.connect = ctx.connect_kwargs
         except (IOError, PasswordRequiredException, SSHException) as e:
             # will print this message followed by traceback
@@ -86,16 +90,16 @@ class Bench:
         hosts = self.manager.hosts(flat=True)
         try:
             g = Group(*hosts, user='ubuntu', connect_kwargs=self.connect)
-            #g.run('ls')
+            # g.run('ls')
             g.run(' && '.join(cmd), hide=True)
             Print.heading(f'Initialized testbed of {len(hosts)} nodes')
         except (GroupException, ExecutionError) as e:
             e = FabricError(e) if isinstance(e, GroupException) else e
             import traceback
             import sys
-            print("Exception",e)
+            print("Exception", e)
             print(traceback.format_exc())
-             # or
+            # or
             print(sys.exc_info()[2])
             raise BenchError('Failed to install repo on testbed', e)
 
@@ -160,29 +164,6 @@ class Bench:
             subprocess.run(['tmux', 'new', '-d', '-s', name, cmd], check=True)
         except subprocess.SubprocessError as e:
             raise BenchError('Failed to kill testbed', e)
-
-    # def _update(self, hosts, collocate):
-    #     if collocate:
-    #         ips = list(set(hosts))
-    #     else:
-    #         ips = list(set([x for y in hosts for x in y]))
-    #
-    #     Print.info(
-    #         f'Updating {len(ips)} machines (branch "{self.settings.branch}")...'
-    #     )
-    #     cmd = [
-    #         f'(cd {self.settings.repo_name} && git fetch -f)',
-    #         f'(cd {self.settings.repo_name} && git checkout -f {self.settings.branch})',
-    #         f'(cd {self.settings.repo_name} && git pull -f)',
-    #         'source $HOME/.cargo/env',
-    #         'sudo apt install pkg-config && sudo apt install libssl-dev',
-    #         f'(cd {self.settings.repo_name} && {CommandMaker.compile()})',
-    #         CommandMaker.alias_binaries(
-    #             f'./{self.settings.repo_name}/target/release/'
-    #         )
-    #     ]
-    #     g = Group(*ips, user='ubuntu', connect_kwargs=self.connect)
-    #     print(g.run(' && '.join(cmd), hide=True))
 
     def _update(self, hosts, collocate):
         # Step 1: Determine unique IPs
@@ -271,338 +252,201 @@ class Bench:
 
         Print.info(f'Successfully updated {len(ips)} machines with local node binary')
 
+    def _config(self, syncer_ip):
+        """Upload configuration files to AWS instances."""
+        # Step 1: Read configuration files from ./configs directory
+        configs_dir = Path('./configs')
+        if not configs_dir.exists():
+            raise BenchError(f'Configs directory {configs_dir} not found', None)
 
-    def _config(self, hosts, node_parameters, bench_parameters):
-        Print.info('Generating configuration files...')
-        #print(hosts)
-        # Cleanup all local configuration files.
-        cmd = CommandMaker.cleanup()
-        subprocess.run([cmd], shell=True, stderr=subprocess.DEVNULL)
+        # Collect node-x.json files
+        node_configs = [f for f in configs_dir.glob('nodes-*.json') if f.is_file()]
+        syncer_file = configs_dir / 'syncer'
+        syncer_json = configs_dir / 'syncer.json'
+        node_0_json = configs_dir / 'nodes-0.json'
 
-        # Recompile the latest code.
-        cmd = CommandMaker.compile().split()
-        subprocess.run(cmd, check=True, cwd=PathMaker.node_crate_path())
+        # Validate syncer files
+        if not syncer_file.exists():
+            raise BenchError(f'Syncer file {syncer_file} not found', None)
+        if not syncer_json.exists():
+            raise BenchError(f'Syncer JSON file {syncer_json} not found', None)
 
-        # Create alias for the client and nodes binary.
-        cmd = CommandMaker.alias_binaries(PathMaker.binary_path())
-        subprocess.run([cmd], shell=True)
+        Print.info(f'Found {len(node_configs)} node configuration files')
 
-        # Generate configuration files.
-        # keys = []
-        # key_files = [PathMaker.key_file(i) for i in range(len(hosts))]
-        # for filename in key_files:
-        #     cmd = CommandMaker.generate_key(filename).split()
-        #     subprocess.run(cmd, check=True)
-        #     keys += [Key.from_file(filename)]
-        #committee = LocalCommittee(names, self.BASE_PORT)
-        #ip_file.print("ip_file")
+        # Step 2: Upload syncer and syncer.json to syncer_ip
+        Print.info(f'Uploading syncer and syncer.json to {syncer_ip}...')
+        try:
+            c = Connection(syncer_ip, user='ubuntu', connect_kwargs=self.connect)
+            # Create or clear /home/ubuntu/configs directory
+            c.run('rm -rf /home/ubuntu/configs && mkdir -p /home/ubuntu/configs', hide=True)
+            # Upload syncer and syncer.json
+            c.put(str(syncer_file), '/home/ubuntu/configs/syncer')
+            c.put(str(syncer_json), '/home/ubuntu/configs/syncer.json')
+            c.put(str(node_0_json), '/home/ubuntu/configs/nodes-0.json')
+            Print.info(f'Successfully uploaded syncer and syncer.json to {syncer_ip}')
+        except Exception as e:
+            raise BenchError(f'Failed to upload syncer files to {syncer_ip}', e)
 
-        # Generate the configuration files for HashRand
-        cmd = CommandMaker.generate_config_files(self.settings.base_port,self.settings.client_base_port,self.settings.client_run_port,len(hosts))
-        subprocess.run(cmd,shell=True)
-        names = [str(x) for x in range(len(hosts))]
-        ip_file = ""
-        syncer=""
-        for x in range(len(hosts)):
-            port = self.settings.base_port + x
-            syncer_port = self.settings.client_base_port + x
-            ip_file += hosts[x]+ ":"+ str(port) + "\n"
-            syncer += hosts[x] + ":" + str(syncer_port) + "\n"
-        ip_file += hosts[0] + ":" + str(self.settings.client_run_port) + "\n"
-        with open("ip_file", 'w') as f:
-            f.write(ip_file)
-        f.close()
-        with open("syncer",'w') as f:
-            f.write(syncer)
-        f.close()
-        #names = [str(x) for x in range(len(hosts))]
+        # Step 3: Process node-x.json files and map to target IPs
+        ip_to_files = {}
+        for config_file in node_configs:
+            try:
+                with open(config_file, 'r') as f:
+                    config = json.load(f)
+                node_id = config.get('id')
+                if node_id is None:
+                    raise BenchError(f'ID not found in {config_file}', None)
 
-        if bench_parameters.collocate:
-            workers = bench_parameters.workers
-            addresses = OrderedDict(
-                (x, [y] * (workers + 1)) for x, y in zip(names, hosts)
-            )
-        else:
-            addresses = OrderedDict(
-                (x, y) for x, y in zip(names, hosts)
-            )
-        committee = Committee(addresses, self.settings.base_port)
-        committee.print(PathMaker.committee_file())
+                # Find IP from net_map_delphi (or any net_map_*)
+                net_map = config.get('net_map_delphi')
+                if not net_map or str(node_id) not in net_map:
+                    raise BenchError(f'net_map_delphi or ID {node_id} not found in {config_file}', None)
 
-        node_parameters.print(PathMaker.parameters_file())
-        # start the syncer on the first node first. 
+                # Extract IP (remove port)
+                ip_port = net_map[str(node_id)]
+                ip = ip_port.split(':')[0]
+                ip_to_files[ip] = ip_to_files.get(ip, []) + [config_file]
+            except json.JSONDecodeError as e:
+                raise BenchError(f'Failed to parse JSON in {config_file}', e)
+            except Exception as e:
+                raise BenchError(f'Error processing {config_file}', e)
 
-        # Cleanup all nodes and upload configuration files.
-        names = names[:len(names)-bench_parameters.faults]
-        progress = progress_bar(names, prefix='Uploading config files:')
-        for i, name in enumerate(progress):
-            #for ip in committee.ips(name):
-            c = Connection(hosts[i], user='ubuntu', connect_kwargs=self.connect)
-            c.run(f'{CommandMaker.cleanup()} || true', hide=True)
-            #c.put(PathMaker.committee_file(), '.')
-            if i == 0:
-                print('Node 0: writing syncer')
-                c.put(PathMaker.syncer(),'.')
-            c.put(PathMaker.key_file(i), '.')
-            c.put(PathMaker.t_key_file(),'.')
-            c.put("ip_file",'.')
-            #c.put(PathMaker.parameters_file(), '.')
-        Print.info('Booting primaries...')
-        st_time = round(time.time() * 1000) + 60000
-        n = 160
-        epsilon = 2
-        rho_0 = 2
-        delta = 20
-        Delta = 2000
-        exp_vals = self.exp_setup(n,delta)
+        Print.info(f'Uploading configuration files to {len(ip_to_files)} instances...')
+
+        # Step 4: Upload node-x.json and syncer to corresponding IPs in parallel
+        def upload_config(ip, files):
+            """Upload node-x.json and syncer to a single instance."""
+            try:
+                c = Connection(ip, user='ubuntu', connect_kwargs=self.connect)
+                # Create or clear /home/ubuntu/configs directory
+                c.run('rm -rf /home/ubuntu/configs && mkdir -p /home/ubuntu/configs', hide=True)
+                # Upload node-x.json files
+                for config_file in files:
+                    c.put(str(config_file), f'/home/ubuntu/configs/{config_file.name}')
+                # Upload syncer
+                c.put(str(syncer_file), '/home/ubuntu/configs/syncer')
+            except Exception as e:
+                raise BenchError(f'Failed to upload config files to {ip}', e)
+
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            futures = [executor.submit(upload_config, ip, files) for ip, files in ip_to_files.items()]
+            progress = progress_bar(futures, prefix='Uploading config files:')
+            for future in progress:
+                future.result()  # Wait for each task to complete and raise any exceptions
+
+        Print.info(f'Successfully uploaded configuration files to {len(ip_to_files)} instances')
+
+    def exp_setup(self, n, delta):
         import numpy as np
-        import random
-        rand = random.randint(1000000,15000000)
-        for i,ip in enumerate(hosts):
-            if i == 0:
-                # Run syncer first
-                print('Running syncer')
-                cmd = CommandMaker.run_syncer(
-                    PathMaker.key_file(i),
-                    st_time,
-                    debug=False
-                )
-                print(cmd)
-                log_file = PathMaker.syncer_log_file()
-                self._background_run(ip, cmd, log_file)
-            cmd = CommandMaker.run_primary(
-                PathMaker.key_file(i),
-                st_time,
-                epsilon,
-                rho_0,
-                exp_vals[i],
-                Delta,
-                100,
-                rand,
-                debug=False
-            )
-            unzip_cmd = CommandMaker.unzip_tkeys('tkeys.tar.gz','thresh_keys')
-            print(unzip_cmd)
-            self._background_run(ip,unzip_cmd,"unzip.log")
-            print(cmd)
-            log_file = PathMaker.primary_log_file(i)
-            self._background_run(ip, cmd, log_file)
-        return committee
-
-    def exp_setup(self,n,delta):
-        import numpy as np
-        #values = np.random.normal(loc=2300,scale=50,size=n)
-        values = np.linspace(2200,2200+delta,num=n)
+        # values = np.random.normal(loc=2300,scale=50,size=n)
+        values = np.linspace(2200, 2200 + delta, num=n)
         arr_int = []
         for val in values:
             arr_int.append(int(val))
         return arr_int
 
-
-    def _just_run(self, hosts, node_parameters, bench_parameters):
-        # Print.info('Generating configuration files...')
-        # print(hosts)
-        # # Cleanup all local configuration files.
-        # cmd = CommandMaker.cleanup()
-        # subprocess.run([cmd], shell=True, stderr=subprocess.DEVNULL)
-
-        # # Recompile the latest code.
-        # cmd = CommandMaker.compile().split()
-        # subprocess.run(cmd, check=True, cwd=PathMaker.node_crate_path())
-
-        # # Create alias for the client and nodes binary.
-        # cmd = CommandMaker.alias_binaries(PathMaker.binary_path())
-        # subprocess.run([cmd], shell=True)
-
-        # # Generate configuration files.
-        # # keys = []
-        # # key_files = [PathMaker.key_file(i) for i in range(len(hosts))]
-        # # for filename in key_files:
-        # #     cmd = CommandMaker.generate_key(filename).split()
-        # #     subprocess.run(cmd, check=True)
-        # #     keys += [Key.from_file(filename)]
-        # names = [str(x) for x in range(len(hosts))]
-        # ip_file = ""
-        # for x in range(len(hosts)):
-        #     port = self.settings.base_port + x
-        #     ip_file += hosts[x]+ ":"+ str(port) + "\n"
-        # with open("ip_file", 'w') as f:
-        #     f.write(ip_file)
-        # f.close()
-        # #committee = LocalCommittee(names, self.BASE_PORT)
-        # #ip_file.print("ip_file")
-
-        # # Generate the configuration files for HashRand
-        # cmd = CommandMaker.generate_config_files(self.settings.base_port,10000,len(hosts))
-        # subprocess.run(cmd,shell=True)
-
-        # names = [str(x) for x in range(len(hosts))]
-
-        # if bench_parameters.collocate:
-        #     workers = bench_parameters.workers
-        #     addresses = OrderedDict(
-        #         (x, [y] * (workers + 1)) for x, y in zip(names, hosts)
-        #     )
-        # else:
-        #     addresses = OrderedDict(
-        #         (x, y) for x, y in zip(names, hosts)
-        #     )
-        # committee = Committee(addresses, self.settings.base_port)
-        # committee.print(PathMaker.committee_file())
-
-        # node_parameters.print(PathMaker.parameters_file())
-
-        # # Cleanup all nodes and upload configuration files.
-        # names = names[:len(names)-bench_parameters.faults]
-        # progress = progress_bar(names, prefix='Uploading config files:')
-        # for i, name in enumerate(progress):
-        #     #for ip in committee.ips(name):
-        #     c = Connection(hosts[i], user='ubuntu', connect_kwargs=self.connect)
-        #     c.run(f'{CommandMaker.cleanup()} || true', hide=True)
-        #     #c.put(PathMaker.committee_file(), '.')
-        #     c.put(PathMaker.key_file(i), '.')
-        #     c.put("ip_file",'.')
-        #     #c.put(PathMaker.parameters_file(), '.')
-        Print.info('Booting primaries...')
-        st_time = round(time.time() * 1000) + 60000
-        n=160
-        epsilon = 2
-        rho_0 = 2
-        delta = 20
-        exp_vals = self.exp_setup(n,delta)
-        import numpy as np
-        Delta = 20
-        import random
-        rand = random.randint(1000000,15000000)
-        for i,ip in enumerate(hosts):
-            #host = Committee.ip(address)
-            if i == 0:
-                # Run syncer first
-                print('Running syncer')
-                cmd = CommandMaker.run_syncer(
-                    PathMaker.key_file(i),
-                    st_time,
-                    debug=False
-                )
-                print(cmd)
-                log_file = PathMaker.syncer_log_file()
-                self._background_run(ip, cmd, log_file)
-            cmd = CommandMaker.run_primary(
-                PathMaker.key_file(i),
-                st_time,
-                epsilon,
-                rho_0,
-                exp_vals[i],
-                Delta,
-                100,
-                rand,
-                debug=False
-            )
-            log_file = PathMaker.primary_log_file(i)
-            self._background_run(ip, cmd, log_file)
-
-    def _run_single(self, hosts, debug=False):
-        # faults = bench_parameters.faults
-
+    def _run_single(self, hosts, sleep_time, bench_parameters, debug=False):
         # Kill any potentially unfinished run and delete logs.
-        # hosts = committee.ips()
         self.kill(hosts=hosts, delete_logs=True)
 
-        # Run the clients (they will wait for the nodes to be ready).
-        # Filter all faulty nodes from the client addresses (or they will wait
-        # for the faulty nodes to be online).
-        #Print.info('Booting clients...')
-        #workers_addresses = committee.workers_addresses(faults)
-        # rate_share = ceil(rate / committee.workers())
-        # for i, addresses in enumerate(workers_addresses):
-        #     for (id, address) in addresses:
-        #         host = Committee.ip(address)
-        #         cmd = CommandMaker.run_client(
-        #             address,
-        #             bench_parameters.tx_size,
-        #             rate_share,
-        #             [x for y in workers_addresses for _, x in y]
-        #         )
-        #         log_file = PathMaker.client_log_file(i, id)
-        #         self._background_run(host, cmd, log_file)
+        now = datetime.now()
+        future = now + timedelta(seconds=sleep_time)
+        st_time = int(future.timestamp() * 1000)
 
-        # Run the primaries (except the faulty ones).
-        Print.info('Booting primaries...')
-        i=0
-        for ip in enumerate(hosts):
-            #host = Committee.ip(address)
-            cmd = CommandMaker.run_primary(
+        # Prepare tasks for parallel execution
+        tasks = []
+
+        # Task for syncer (last host)
+        syncer_ip = hosts[-1]
+        syncer_cmd = CommandMaker.run_syncer(
+            PathMaker.key_file(0),
+            st_time,
+            debug=debug
+        )
+        syncer_log = PathMaker.syncer_log_file()
+        tasks.append((syncer_ip, syncer_cmd, syncer_log))
+
+        # Tasks for primaries (all hosts except the last one)
+        for i, ip in enumerate(hosts[:-1]):
+            primary_cmd = CommandMaker.run_primary(
                 PathMaker.key_file(i),
+                st_time,
                 debug=debug
             )
-            log_file = PathMaker.primary_log_file(i)
-            self._background_run(ip, cmd, log_file)
-            i+=1
-        # Run the workers (except the faulty ones).
-        # Print.info('Booting workers...')
-        # for i, addresses in enumerate(workers_addresses):
-        #     for (id, address) in addresses:
-        #         host = Committee.ip(address)
-        #         cmd = CommandMaker.run_worker(
-        #             PathMaker.key_file(i),
-        #             PathMaker.committee_file(),
-        #             PathMaker.db_path(i, id),
-        #             PathMaker.parameters_file(),
-        #             id,  # The worker's id.
-        #             debug=debug
-        #         )
-        #         log_file = PathMaker.worker_log_file(i, id)
-        #         self._background_run(host, cmd, log_file)
+            primary_log = PathMaker.primary_log_file(i)
+            tasks.append((ip, primary_cmd, primary_log))
 
-        # Wait for all transactions to be processed.
-        # duration = bench_parameters.duration
-        # for _ in progress_bar(range(20), prefix=f'Running benchmark ({duration} sec):'):
-        #     sleep(ceil(duration / 20))
-        # self.kill(hosts=hosts, delete_logs=False)
+        Print.info(f'Booting {len(tasks)} processes (1 syncer + {len(tasks) - 1} primaries)...')
+
+        # Run all processes in parallel
+        def run_task(ip, cmd, log_file):
+            """Run a single background process on a host."""
+            try:
+                self._background_run(ip, cmd, log_file)
+            except Exception as e:
+                raise BenchError(f'Failed to start process on {ip}', e)
+
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            futures = [executor.submit(run_task, ip, cmd, log_file) for ip, cmd, log_file in tasks]
+            progress = progress_bar(futures, prefix='Starting processes:')
+            for future in progress:
+                future.result()  # Wait for each task to complete and raise any exceptions
+
+        Print.info(f'Successfully started {len(tasks)} processes')
+
+        # Wait for all transactions to be processed
+        duration = bench_parameters.duration + sleep_time
+        for _ in progress_bar(range(20), prefix=f'Running benchmark ({duration} sec):'):
+            sleep(ceil(duration / 20))
+
+        self.kill(hosts=hosts, delete_logs=False)
 
     def _logs(self, hosts, faults):
         # Delete local logs (if any).
         cmd = CommandMaker.clean_logs()
         subprocess.run([cmd], shell=True, stderr=subprocess.DEVNULL)
+        """Download log files from remote instances in parallel."""
+        # Prepare tasks for downloading logs
+        tasks = []
 
-        # Download log files.
-        #workers_addresses = committee.workers_addresses(faults)
-        progress = progress_bar(hosts, prefix='Downloading workers logs:')
-        for i, address in enumerate(progress):
-            c = Connection(address, user='ubuntu', connect_kwargs=self.connect)
-            if i==0:
-                c.get(
-                    PathMaker.syncer_log_file(),
-                    local=PathMaker.syncer_log_file()
-                )
-                c.get(
-                    PathMaker.client_log_file(i, 0), 
-                    local=PathMaker.client_log_file(i, 0)
-                )
-            # c.get(
-            #     PathMaker.client_log_file(i, 0), 
-            #     local=PathMaker.client_log_file(i, 0)
-            # )
-            # c.get(
-            #     PathMaker.worker_log_file(i, id),     
-            #     local=PathMaker.worker_log_file(i, id)
-            # )
+        # Tasks for primaries (all hosts except the last one)
+        primary_addresses = hosts[:-1]
+        for i, ip in enumerate(primary_addresses):
+            remote_log = PathMaker.primary_log_file(i)
+            local_log = PathMaker.primary_log_file(i)
+            tasks.append((ip, remote_log, local_log))
 
-        # primary_addresses = committee.primary_addresses(faults)
-        # progress = progress_bar(primary_addresses, prefix='Downloading primaries logs:')
-        # for i, address in enumerate(progress):
-        #     host = Committee.ip(address)
-        #     c = Connection(host, user='ubuntu', connect_kwargs=self.connect)
-        #     c.get(
-        #         PathMaker.primary_log_file(i), 
-        #         local=PathMaker.primary_log_file(i)
-        #    )
+        # Task for syncer (last host)
+        syncer_ip = hosts[-1]
+        remote_syncer_log = PathMaker.syncer_log_file()
+        local_syncer_log = PathMaker.syncer_log_file()
+        tasks.append((syncer_ip, remote_syncer_log, local_syncer_log))
+
+        Print.info(f'Downloading {len(tasks)} log files (1 syncer + {len(primary_addresses)} primaries)...')
+
+        # Download logs in parallel
+        def download_log(ip, remote_path, local_path):
+            """Download a single log file from a remote instance."""
+            try:
+                c = Connection(ip, user='ubuntu', connect_kwargs=self.connect)
+                c.get(remote_path, local=local_path)
+            except Exception as e:
+                raise BenchError(f'Failed to download log {remote_path} from {ip}', e)
+
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            futures = [executor.submit(download_log, ip, remote_path, local_path) for ip, remote_path, local_path in
+                       tasks]
+            progress = progress_bar(futures, prefix='Downloading log files:')
+            for future in progress:
+                future.result()  # Wait for each task to complete and raise any exceptions
+
+        Print.info(f'Successfully downloaded {len(tasks)} log files')
 
         # Parse logs and return the parser.
         Print.info('Parsing logs and computing performance...')
         return LogParser.process(PathMaker.logs_path(), faults=faults)
 
-    def run(self, bench_parameters_dict, dkg_params, debug=False):
+    def run(self, bench_parameters_dict, dkg_params, debug=False, update_bin = True, update_conf = True):
         assert isinstance(debug, bool)
         Print.heading('Starting remote benchmark')
         try:
@@ -617,143 +461,60 @@ class Bench:
             Print.warn('There are not enough instances available')
             return
 
+        if update_bin:
+            # Update nodes.
+            try:
+                self._update(selected_hosts, bench_parameters.collocate)
+            except (GroupException, ExecutionError) as e:
+                e = FabricError(e) if isinstance(e, GroupException) else e
+                raise BenchError('Failed to update nodes', e)
 
-        # Update nodes.
-        try:
-            self._update(selected_hosts, bench_parameters.collocate)
-        except (GroupException, ExecutionError) as e:
-            e = FabricError(e) if isinstance(e, GroupException) else e
-            raise BenchError('Failed to update nodes', e)
+            # Create alias for the client and nodes binary.
+            cmd = CommandMaker.alias_binaries(PathMaker.binary_path())
+            subprocess.run([cmd], shell=True)
 
-        # Create alias for the client and nodes binary.
-        cmd = CommandMaker.alias_binaries(PathMaker.binary_path())
-        subprocess.run([cmd], shell=True)
+            host_str = " ".join(selected_hosts)
+            print("hoststr=", host_str)
 
-        host_str = " ".join(selected_hosts)
-        print("hoststr=",host_str)
-
-        # Generate the configuration files
-        cmd = CommandMaker.generate_config_files_remote(self.BASE_PORT, self.RBC_BASE_PORT, self.DKG_BASE_PORT,
-                                                 self.DRB_BASE_PORT, self.cl_bport, self.cl_rport,
-                                                 bench_parameters.nodes,
-                                                 dkg_params, bench_parameters.kappa,host_str)
-        self._background_run_local(cmd, "err.log")
-        time.sleep(1)
-
-        # # Upload all configuration files.
-        # try:
-        #     committee = self._config(
-        #         selected_hosts, node_parameters, bench_parameters
-        #     )
-        # except (subprocess.SubprocessError, GroupException) as e:
-        #     e = FabricError(e) if isinstance(e, GroupException) else e
-        #     raise BenchError('Failed to configure nodes', e)
+            # Generate the configuration files
+            cmd = CommandMaker.generate_config_files_remote(self.BASE_PORT, self.RBC_BASE_PORT, self.DKG_BASE_PORT,
+                                                            self.DRB_BASE_PORT, self.cl_bport, self.cl_rport,
+                                                            bench_parameters.nodes,
+                                                            dkg_params, bench_parameters.kappa, host_str)
+            self._background_run_local(cmd, "err.log")
+            time.sleep(1)
+        if update_conf:
+            # Upload all configuration files.
+            try:
+                self._config(selected_hosts[-1])
+            except (subprocess.SubprocessError, GroupException) as e:
+                e = FabricError(e) if isinstance(e, GroupException) else e
+                raise BenchError('Failed to configure nodes', e)
 
         # Run benchmarks.
-        # for n in bench_parameters.nodes:
-        #     committee_copy = deepcopy(committee)
-        #     committee_copy.remove_nodes(committee.size() - n)
+        n = bench_parameters.nodes
+        k = bench_parameters.kappa
+        d = dkg_params.trans_delay
+        Print.heading(f'\nRunning {n} nodes (kappa: {k}, trans delay: {d})')
 
-        #     for r in bench_parameters.rate:
-        #         Print.heading(f'\nRunning {n} nodes (input rate: {r:,} tx/s)')
+        for i in range(bench_parameters.runs):
+            Print.heading(f'Run {i + 1}/{bench_parameters.runs}')
+            try:
+                self._run_single(
+                    selected_hosts, 5, bench_parameters, debug
+                )
 
-        #         # Run the benchmark.
-        #         for i in range(bench_parameters.runs):
-        #             Print.heading(f'Run {i+1}/{bench_parameters.runs}')
-        #             try:
-        #                 self._run_single(
-        #                     r, committee_copy, bench_parameters, debug
-        #                 )
-
-        #                 faults = bench_parameters.faults
-        #                 #logger = self._logs(committee_copy, faults)
-        #                 logger.print(PathMaker.result_file(
-        #                     faults,
-        #                     n, 
-        #                     bench_parameters.workers,
-        #                     bench_parameters.collocate,
-        #                     r, 
-        #                     bench_parameters.tx_size, 
-        #                 ))
-        #             except (subprocess.SubprocessError, GroupException, ParseError) as e:
-        #                 self.kill(hosts=selected_hosts)
-        #                 if isinstance(e, GroupException):
-        #                     e = FabricError(e)
-        #                 Print.error(BenchError('Benchmark failed', e))
-        #                 continue
-    def justrun(self, bench_parameters_dict, node_parameters_dict, debug=False):
-        assert isinstance(debug, bool)
-        Print.heading('Starting remote benchmark')
-        try:
-            bench_parameters = BenchParameters(bench_parameters_dict)
-            node_parameters = NodeParameters(node_parameters_dict)
-        except ConfigError as e:
-            raise BenchError('Invalid nodes or bench parameters', e)
-
-        # Select which hosts to use.
-        selected_hosts = self._select_hosts(bench_parameters)
-        print(selected_hosts)
-        if not selected_hosts:
-            Print.warn('There are not enough instances available')
-            return
-
-        # Update nodes.
-        try:
-            self._update(selected_hosts, bench_parameters.collocate)
-        except (GroupException, ExecutionError) as e:
-            e = FabricError(e) if isinstance(e, GroupException) else e
-            raise BenchError('Failed to update nodes', e)
-
-        # Upload all configuration files.
-        try:
-            committee = self._just_run(
-                selected_hosts, node_parameters, bench_parameters
-            )
-        except (subprocess.SubprocessError, GroupException) as e:
-            e = FabricError(e) if isinstance(e, GroupException) else e
-            raise BenchError('Failed to configure nodes', e)
-
-        # Run benchmarks.
-        # for n in bench_parameters.nodes:
-        #     committee_copy = deepcopy(committee)
-        #     committee_copy.remove_nodes(committee.size() - n)
-
-        #     for r in bench_parameters.rate:
-        #         Print.heading(f'\nRunning {n} nodes (input rate: {r:,} tx/s)')
-
-        #         # Run the benchmark.
-        #         for i in range(bench_parameters.runs):
-        #             Print.heading(f'Run {i+1}/{bench_parameters.runs}')
-        #             try:
-        #                 self._run_single(
-        #                     r, committee_copy, bench_parameters, debug
-        #                 )
-
-        #                 faults = bench_parameters.faults
-        #                 #logger = self._logs(committee_copy, faults)
-        #                 logger.print(PathMaker.result_file(
-        #                     faults,
-        #                     n, 
-        #                     bench_parameters.workers,
-        #                     bench_parameters.collocate,
-        #                     r, 
-        #                     bench_parameters.tx_size, 
-        #                 ))
-        #             except (subprocess.SubprocessError, GroupException, ParseError) as e:
-        #                 self.kill(hosts=selected_hosts)
-        #                 if isinstance(e, GroupException):
-        #                     e = FabricError(e)
-        #                 Print.error(BenchError('Benchmark failed', e))
-        #                 continue
-    def pull_logs(self, bench_parameters_dict, node_parameters_dict, debug=False):
-        assert isinstance(debug, bool)
-        Print.heading('Starting remote benchmark')
-        try:
-            bench_parameters = BenchParameters(bench_parameters_dict)
-            node_parameters = NodeParameters(node_parameters_dict)
-        except ConfigError as e:
-            raise BenchError('Invalid nodes or bench parameters', e)
-
-        # Select which hosts to use.
-        selected_hosts = self._select_hosts(bench_parameters)
-        return self._logs(selected_hosts,0)
+                faults = bench_parameters.faults
+                logger = self._logs(selected_hosts, faults)
+                logger.print(PathMaker.result_file(
+                    faults,
+                    n,
+                    k,
+                    d
+                ))
+            except (subprocess.SubprocessError, GroupException, ParseError) as e:
+                self.kill(hosts=selected_hosts)
+                if isinstance(e, GroupException):
+                    e = FabricError(e)
+                Print.error(BenchError('Benchmark failed', e))
+                continue

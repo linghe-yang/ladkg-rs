@@ -110,25 +110,11 @@ class InstanceManager:
             Filters=[
                 {
                     'Name': 'description',
-                    'Values': ['Canonical, Ubuntu, 20.04*']  # Broader filter to match variations
+                    'Values': ['Canonical, Ubuntu, 20.04*']
                 },
-                # {
-                #     'Name': 'owner-id',
-                #     'Values': ['099720109477']  # Canonical's AWS account ID
-                # }
             ]
         )
-        print(response)
         return response['Images'][0]['ImageId']
-        # print("client:", client)
-        # # The AMI changes with regions.
-        # response = client.describe_images(
-        #     Filters=[{
-        #         'Name': 'description',
-        #         'Values': ['Canonical, Ubuntu, 20.04 LTS, amd64 focal image build on *']
-        #     }]
-        # )
-        # return response['Images'][0]['ImageId']
 
     def create_instances(self, instances):
         assert isinstance(instances, int) and instances > 0
