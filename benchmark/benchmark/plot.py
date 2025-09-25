@@ -256,7 +256,7 @@ class Plotter:
             fig, ax = plt.subplots()
             x = np.arange(len(waiting_times))
             # Adaptive bar width to fill figure, max 80% of available space
-            bar_width = min(0.9 / len(waiting_times), 0.15)
+            bar_width = min(1.5 / len(waiting_times), 0.4)
 
             # Less saturated colors
             colors = ['#4a90e2', '#ff9f43', '#4caf50', '#e57373', '#b39ddb']

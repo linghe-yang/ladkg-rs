@@ -7,7 +7,37 @@ from benchmark.plot import Plotter, PlotError
 from benchmark.remote import Bench, BenchError
 from benchmark.utils import Print
 
-nodes = 4
+
+# nodes = 4: kappa = 2,4 trans_delay=0, 5,10,20
+# nodes = 10; kappa = 4 trans_delay=0, 5,10,20
+
+nodes = 10
+
+@task
+def remote(ctx, debug=False):
+    ''' Run benchmarks on AWS '''
+    assert nodes % 3 == 1
+    bench_params = {
+        'faults': 0,
+        'nodes': nodes,
+        'runs': 3,
+        'kappa': 4,
+        'duration': 30, # + 10 ms
+    }
+    dkg_params = {
+        'delta': 10,
+        'epsilon': 19999,
+        'tri': 100000,
+        'hr_batch': 40,
+        'hr_freq': 20,
+        'trans_delay': 1000  # ms
+    }
+    try:
+        Bench(ctx).run(bench_params, dkg_params, debug, False, True)
+    except BenchError as e:
+        Print.error(e)
+
+
 @task
 def local(ctx, debug=True):
     assert nodes % 3 == 1
@@ -15,12 +45,12 @@ def local(ctx, debug=True):
     bench_params = {
         'faults': 0,
         'nodes': nodes,
-        'kappa': 2,
-        'duration': 10,
+        'kappa': 4,
+        'duration': 20,
     }
     dkg_params = {
         'delta': 10,
-        'epsilon': 1,
+        'epsilon': 19999,
         'tri': 100000,
         'hr_batch': 40,
         'hr_freq': 20,
@@ -32,29 +62,7 @@ def local(ctx, debug=True):
     except BenchError as e:
         Print.error(e)
 
-@task
-def remote(ctx, debug=False):
-    ''' Run benchmarks on AWS '''
-    assert nodes % 3 == 1
-    bench_params = {
-        'faults': 0,
-        'nodes': nodes,
-        'runs': 1,
-        'kappa': 2,
-        'duration': 15,
-    }
-    dkg_params = {
-        'delta': 10,
-        'epsilon': 1,
-        'tri': 100000,
-        'hr_batch': 40,
-        'hr_freq': 20,
-        'trans_delay': 500  # ms
-    }
-    try:
-        Bench(ctx).run(bench_params, dkg_params, debug, True, True)
-    except BenchError as e:
-        Print.error(e)
+
 
 @task
 def create(ctx, nodes=nodes):
@@ -115,7 +123,7 @@ def plot(ctx):
     plot_params = {
         'faults': 0,
         'nodes': [10],
-        'kappa': 3
+        'kappa': 4
     }
     try:
         Plotter.plot(plot_params)

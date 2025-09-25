@@ -1,6 +1,6 @@
 // A tool that builds config files for all the nodes and the clients for the
 // protocol.
-
+#![allow(warnings)]
 use avsss::{PublicKey, VE};
 use clap::{load_yaml, App};
 use config::{ACSParams, Client, DKGParams, DRBParams, DelphiParams, Node};
@@ -10,10 +10,7 @@ use crypto::Algorithm;
 use crypto::{ed25519, secp256k1::{self, SecretKey}};
 use fnv::FnvHashMap as HashMap;
 use rand::Rng;
-#[cfg(not(feature = "remote"))]
 use std::{error::Error, fs::File, io::{BufWriter, Write}};
-#[cfg(feature = "remote")]
-use std::{fs::File, io::{BufWriter, Write}};
 use std::net::SocketAddrV4;
 use types::{Replica, Val};
 use util::io::*;

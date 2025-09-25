@@ -122,12 +122,13 @@ class Bench:
 
             # Ensure there are enough hosts.
             hosts = self.manager.hosts()
-            if sum(len(x) for x in hosts.values()) < nodes:
+            total_hosts = sum(len(x) for x in hosts.values())
+            if total_hosts < nodes:
+                Print.warn(f'Not enough hosts: required {nodes}, available {total_hosts}')
                 return []
 
-            # Select the hosts in different data centers.
-            ordered = zip(*hosts.values())
-            ordered = [x for y in ordered for x in y]
+            # Select all hosts by flattening the IP lists
+            ordered = [ip for region_ips in hosts.values() for ip in region_ips]
             return ordered[:nodes]
 
         # Spawn the primary and each worker on a different machine. Each
@@ -461,6 +462,8 @@ class Bench:
             Print.warn('There are not enough instances available')
             return
 
+        host_str = " ".join(selected_hosts)
+
         if update_bin:
             # Update nodes.
             try:
@@ -473,17 +476,15 @@ class Bench:
             cmd = CommandMaker.alias_binaries(PathMaker.binary_path())
             subprocess.run([cmd], shell=True)
 
-            host_str = " ".join(selected_hosts)
-            print("hoststr=", host_str)
 
+        if update_conf:
             # Generate the configuration files
             cmd = CommandMaker.generate_config_files_remote(self.BASE_PORT, self.RBC_BASE_PORT, self.DKG_BASE_PORT,
                                                             self.DRB_BASE_PORT, self.cl_bport, self.cl_rport,
                                                             bench_parameters.nodes,
                                                             dkg_params, bench_parameters.kappa, host_str)
             self._background_run_local(cmd, "err.log")
-            time.sleep(1)
-        if update_conf:
+            time.sleep(2)
             # Upload all configuration files.
             try:
                 self._config(selected_hosts[-1])
@@ -501,7 +502,7 @@ class Bench:
             Print.heading(f'Run {i + 1}/{bench_parameters.runs}')
             try:
                 self._run_single(
-                    selected_hosts, 5, bench_parameters, debug
+                    selected_hosts, 10, bench_parameters, debug
                 )
 
                 faults = bench_parameters.faults

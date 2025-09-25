@@ -1,16 +1,10 @@
 # Copyright(C) Facebook, Inc. and its affiliates.
-from re import search
-from collections import defaultdict
-from statistics import mean, stdev
+import re
 from glob import glob
-from copy import deepcopy
 from os.path import join
-import os
+from re import search
 
 from benchmark.utils import PathMaker
-
-from pathlib import Path
-import re
 
 
 class Setup:
@@ -120,7 +114,6 @@ class LogAggregator:
             print(r.transcript_verification)
             print(r.reconstruct_phase)
 
-
     def aggregate_results(self):
         # Dictionary to store results grouped by CONFIG key
         config_groups = {}
@@ -158,11 +151,17 @@ class LogAggregator:
                 for line in result_lines:
                     if ':' in line:
                         key, value = line.split(':', 1)
-                        results[key.strip()] = float(value.split()[0])  # Extract numeric value
+                        # Remove commas from the numeric value before converting to float
+                        numeric_value = value.split()[0].replace(',', '')
+                        results[key.strip()] = float(numeric_value)
 
-                # Create config key for grouping
-                config_key = (faults, committee_size, int(config['AACS kappa'].split()[0]),
-                            int(config['DKG Transaction waiting time'].split()[0]))
+                # Create config key for grouping, removing commas from CONFIG values
+                config_key = (
+                    faults,
+                    committee_size,
+                    int(config['AACS kappa'].split()[0].replace(',', '')),
+                    int(config['DKG Transaction waiting time'].split()[0].replace(',', ''))
+                )
 
                 if config_key not in config_groups:
                     config_groups[config_key] = []

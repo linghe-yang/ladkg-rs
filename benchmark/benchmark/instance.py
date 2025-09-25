@@ -129,18 +129,26 @@ class InstanceManager:
                     raise BenchError('Failed to create security group', error)
 
         try:
-            # Create all instances.
-            size = instances * len(self.clients)
+            # Calculate instance distribution across regions
+            num_regions = len(self.clients)
+            base_count = instances // num_regions
+            remainder = instances % num_regions
+            instance_counts = [base_count + 1 if i < remainder else base_count for i in range(num_regions)]
+
+            # Create instances in each region
             progress = progress_bar(
-                self.clients.values(), prefix=f'Creating {size} instances'
+                list(zip(self.clients.values(), instance_counts)),  # Convert zip to list
+                prefix=f'Creating {instances} instances across {num_regions} regions'
             )
-            for client in progress:
+            for client, count in progress:
+                if count == 0:
+                    continue  # Skip regions with zero instances
                 client.run_instances(
                     ImageId=self._get_ami(client),
                     InstanceType=self.settings.instance_type,
                     KeyName=self.settings.key_name,
-                    MaxCount=instances,
-                    MinCount=instances,
+                    MaxCount=count,
+                    MinCount=count,
                     SecurityGroups=[self.SECURITY_GROUP_NAME],
                     TagSpecifications=[{
                         'ResourceType': 'instance',
@@ -160,10 +168,10 @@ class InstanceManager:
                     }],
                 )
 
-            # Wait for the instances to boot.
+            # Wait for the instances to boot
             Print.info('Waiting for all instances to boot...')
             self._wait(['pending'])
-            Print.heading(f'Successfully created {size} new instances')
+            Print.heading(f'Successfully created {instances} new instances')
         except ClientError as e:
             raise BenchError('Failed to create AWS instances', AWSError(e))
 
