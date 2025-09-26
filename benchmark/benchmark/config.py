@@ -239,6 +239,7 @@ class PlotParameters:
             self.nodes = [int(x) for x in nodes]
 
             self.kappa = int(json['kappa'])
+            self.td = int(json['trans_delay'])
 
         except KeyError as e:
             raise ConfigError(f'Malformed bench parameters: missing key {e}')
