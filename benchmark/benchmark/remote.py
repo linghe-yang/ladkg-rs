@@ -502,7 +502,7 @@ class Bench:
             Print.heading(f'Run {i + 1}/{bench_parameters.runs}')
             try:
                 self._run_single(
-                    selected_hosts, 10, bench_parameters, debug
+                    selected_hosts, 15, bench_parameters, debug
                 )
 
                 faults = bench_parameters.faults

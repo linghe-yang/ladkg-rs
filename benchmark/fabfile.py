@@ -11,7 +11,7 @@ from benchmark.utils import Print
 # nodes = 4: kappa = 2,4 trans_delay=0, 5,10,20
 # nodes = 10; kappa = 4 trans_delay=0, 5,10,20
 
-nodes = 10
+nodes = 64
 
 @task
 def remote(ctx, debug=False):
@@ -21,16 +21,16 @@ def remote(ctx, debug=False):
         'faults': 0,
         'nodes': nodes,
         'runs': 3,
-        'kappa': 4,
-        'duration': 30, # + 10 ms
+        'kappa': 15,
+        'duration': 40, # + 20 ms
     }
     dkg_params = {
         'delta': 10,
-        'epsilon': 19999,
+        'epsilon': 3124, # n=10,19999 n=31,6451 n=64,3124
         'tri': 100000,
         'hr_batch': 40,
         'hr_freq': 20,
-        'trans_delay': 1000  # ms
+        'trans_delay': 2000  # ms
     }
     try:
         Bench(ctx).run(bench_params, dkg_params, debug, False, True)
