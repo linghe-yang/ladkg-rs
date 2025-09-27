@@ -1,0 +1,23 @@
+n=10
+Size of share: 364.305 KB
+Size of sup_share: 1014.363 KB
+Size of secret key: 5.352 KB
+Size of public key: 2.676 KB
+
+n=31
+Size of share: 420.774 KB
+Size of sup_share: 1014.396 KB
+Size of secret key: 5.352 KB
+Size of public key: 2.676 KB
+
+n=64
+Size of share: 509.494 KB
+Size of sup_share: 1014.428 KB
+Size of secret key: 5.352 KB
+Size of public key: 2.676 KB
+
+n=100
+Size of share: 606.276 KB
+Size of sup_share: 1014.460 KB
+Size of secret key: 5.352 KB
+Size of public key: 2.676 KB
