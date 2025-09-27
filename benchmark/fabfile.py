@@ -11,7 +11,8 @@ from benchmark.utils import Print
 # nodes = 4: kappa = 2,4 trans_delay=0, 5,10,20
 # nodes = 10; kappa = 4 trans_delay=0, 5,10,20
 
-nodes = 64
+
+nodes = 4
 
 @task
 def remote(ctx, debug=False):
@@ -20,23 +21,46 @@ def remote(ctx, debug=False):
     bench_params = {
         'faults': 0,
         'nodes': nodes,
-        'runs': 3,
+        'runs': 1,
         'kappa': 15,
-        'duration': 40, # + 20 ms
+        'duration': 60, # + 20 ms
     }
     dkg_params = {
         'delta': 10,
-        'epsilon': 3124, # n=10,19999 n=31,6451 n=64,3124
+        'epsilon': 1652, # n=10,19999 n=31,6451 n=64,3124 n=100,1999 n=121,1652
         'tri': 100000,
         'hr_batch': 40,
         'hr_freq': 20,
         'trans_delay': 2000  # ms
     }
     try:
-        Bench(ctx).run(bench_params, dkg_params, debug, False, True)
+        Bench(ctx).run(bench_params, dkg_params, debug, False, False)
     except BenchError as e:
         Print.error(e)
 
+@task
+def remote_log(ctx, debug=False):
+    ''' Run benchmarks on AWS '''
+    assert nodes % 3 == 1
+    bench_params = {
+        'faults': 0,
+        'nodes': nodes,
+        'runs': 1,
+        'kappa': 15,
+        'duration': 60, # + 20 ms
+    }
+    dkg_params = {
+        'delta': 10,
+        'epsilon': 1652, # n=10,19999 n=31,6451 n=64,3124 n=100,1999 n=121,1652
+        'tri': 100000,
+        'hr_batch': 40,
+        'hr_freq': 20,
+        'trans_delay': 2000  # ms
+    }
+    try:
+        Bench(ctx).run_log(bench_params, dkg_params, debug, False, False)
+    except BenchError as e:
+        Print.error(e)
 
 @task
 def local(ctx, debug=True):
@@ -45,7 +69,7 @@ def local(ctx, debug=True):
     bench_params = {
         'faults': 0,
         'nodes': nodes,
-        'kappa': 4,
+        'kappa': 2,
         'duration': 20,
     }
     dkg_params = {

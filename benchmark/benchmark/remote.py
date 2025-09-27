@@ -502,7 +502,7 @@ class Bench:
             Print.heading(f'Run {i + 1}/{bench_parameters.runs}')
             try:
                 self._run_single(
-                    selected_hosts, 15, bench_parameters, debug
+                    selected_hosts, 20, bench_parameters, debug
                 )
 
                 faults = bench_parameters.faults
@@ -519,3 +519,25 @@ class Bench:
                     e = FabricError(e)
                 Print.error(BenchError('Benchmark failed', e))
                 continue
+
+
+    def run_log(self, bench_parameters_dict, dkg_params, debug=False, update_bin = True, update_conf = True):
+        assert isinstance(debug, bool)
+        Print.heading('Starting remote benchmark')
+        try:
+            bench_parameters = BenchParameters(bench_parameters_dict)
+            dkg_params = DKGParameters(dkg_params)
+        except ConfigError as e:
+            raise BenchError('Invalid nodes or bench parameters', e)
+
+        faults = bench_parameters.faults
+        n = bench_parameters.nodes
+        k = bench_parameters.kappa
+        d = dkg_params.trans_delay
+        logger = LogParser.process(PathMaker.logs_path(), faults=faults)
+        logger.print(PathMaker.result_file(
+            faults,
+            n,
+            k,
+            d
+        ))

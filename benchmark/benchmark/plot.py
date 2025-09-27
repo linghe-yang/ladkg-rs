@@ -211,7 +211,7 @@ class Plotter:
         other_data = {}
         other_files = glob(join('results', 'other-*.txt'))
         for filename in other_files:
-            # Extract work name from filename (e.g., 'adkg' from 'other-adkg.txt')
+            # Extract work name from filename (e.g., 'adkg' from 'other-Das et al bls12381.txt')
             work_name = os.path.basename(filename).replace('other-', '').replace('.txt', '')
             nodes = []
             times = []

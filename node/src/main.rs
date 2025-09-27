@@ -8,12 +8,11 @@ use clap::{
 use config::Node;
 use signal_hook::{iterator::Signals, consts::{SIGINT, SIGTERM}};
 use types::{Val};
-use std::{net::{SocketAddr, SocketAddrV4}, thread};
-use std::sync::Arc;
+use std::{net::{SocketAddr, SocketAddrV4}};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use env_logger::Env;
 use fnv::FnvHashMap;
-use log::info;
+use log::{info};
 use tokio::sync::mpsc::{channel};
 use node::Syncer;
 use types::dkg::trans::Transcript;
@@ -21,8 +20,8 @@ use types::dkg::trans::Transcript;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-
     let mut logger = env_logger::Builder::from_env(Env::default().default_filter_or("info"));
+
     logger.format_timestamp_millis();
     logger.init();
 
