@@ -1,5 +1,5 @@
 use crate::appxcon::Replica;
-use crate::dkg::trans::Transcript;
+use crate::dkg::trans::TranStream;
 use avsss::components::{PrivateShare, PublicShare};
 use avsss::r_ring::R;
 use crypto::dilithum_sig::Signature;
@@ -30,7 +30,7 @@ impl ACSWrapperMsg {
 
 #[derive(Debug,Serialize,Deserialize,Clone)]
 pub enum ACSMsg {
-    RBCTrans(Transcript, Replica),
+    RBCTrans(TranStream, Replica),
     RBCIndexSet(HashSet<Replica>, Replica),
 }
 

@@ -11,7 +11,7 @@ tokio = { version = "1.0", features = ["full"] }
 log="*"
 fnv = "1"
 anyhow = "1"
-network = { package = "network", git = "https://github.com/akhilsb/libnet-rs.git" }
+network = { package = "network", git = "https://github.com/linghe-yang/libnet-rs.git" }
 async-trait = "0"
 futures-util = "0"
 rand = "0.8"

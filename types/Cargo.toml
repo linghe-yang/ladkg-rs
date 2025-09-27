@@ -24,6 +24,7 @@ sha3="0.9.1"
 base64 = "0.13.1"
 avsss = { package = "avsss", git = "https://github.com/linghe-yang/lvss.git"}
 nalgebra = "0.25.3"
+zstd = "0.13.3"
 
 [features]
 default=["mempool"]

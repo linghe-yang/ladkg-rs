@@ -4,6 +4,7 @@ use avsss::PublicKey as VEPublicKey;
 use crypto::dilithum_sig::{PublicKey as DilithiumPublicKey, Signature};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+use std::io::Cursor;
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct Transcript {
@@ -12,6 +13,8 @@ pub struct Transcript {
     pub pub_share: PublicShare,
     pub supple_shares: Vec<SuppleShare>,
 }
+
+pub type TranStream = Vec<u8>;
 
 impl Transcript {
     pub fn verify(
@@ -79,4 +82,37 @@ impl Transcript {
         // the union automatically covers 1 to n without gaps.
         true
     }
+
+    pub fn serialize_and_compress(&self, compression_level: i32) -> TranStream {
+        let serialized: Vec<u8> = bincode::serialize(self).expect("Failed to serialize Transcript");
+
+        let mut compressed = Vec::new();
+        let mut cursor = Cursor::new(serialized);
+        zstd::stream::copy_encode(&mut cursor, &mut compressed, compression_level)
+            .expect("Failed to compress data");
+
+        compressed
+    }
+    pub fn decompress_and_deserialize(compressed_data: &TranStream) -> Transcript {
+        let mut decompressed = Vec::new();
+        let mut cursor = Cursor::new(compressed_data);
+        zstd::stream::copy_decode(&mut cursor, &mut decompressed)
+            .expect("Failed to decompress data");
+
+        bincode::deserialize(&decompressed).expect("Failed to deserialize Transcript")
+    }
+}
+
+#[test]
+fn test(){
+    let transcript = Transcript::default(); // 替换为实际Transcript实例
+
+    // 序列化并压缩
+    let compressed = transcript.serialize_and_compress(3); // 使用压缩级别3
+
+    // 解压并反序列化
+    let recovered = Transcript::decompress_and_deserialize(&compressed);
+
+    println!("{:?}", transcript);
+    println!("{:?}", recovered);
 }

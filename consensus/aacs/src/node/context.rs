@@ -168,7 +168,7 @@ impl Context {
                 // Handle incoming transcripts
                 Some(transcript) = self.trans_recv.recv() => {
                     info!("Node {}: Transcript received from VSS", self.myid);
-                    self.broadcast(ACSMsg::RBCTrans(transcript.clone(), self.myid)).await;
+                    self.broadcast(ACSMsg::RBCTrans(transcript.serialize_and_compress(10), self.myid)).await;
                 }
                 // Handle network messages
                 Some(msg) = self.net_recv.recv() => {
@@ -189,7 +189,7 @@ impl Context {
         match msg {
             ACSMsg::RBCTrans(trans, sender) => {
                 info!("Node {}: Received Transcript from {}", self.myid, sender);
-                self.trans_buffer.insert(sender, trans);
+                self.trans_buffer.insert(sender, Transcript::decompress_and_deserialize(&trans));
                 // Leader-specific logic
                 if self.leaders.contains(&self.myid) && !self.indices_broadcasted {
                     if let Some(set) = find_t_transcripts(&self.trans_buffer, self.num_nodes - self.num_faults) {

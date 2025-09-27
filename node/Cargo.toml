@@ -22,7 +22,7 @@ simple_logger="*"
 fnv = "1.0.3"
 signal-hook = "0"
 
-network = { package = "network", git = "https://github.com/akhilsb/libnet-rs.git" }
+network = { package = "network", git = "https://github.com/linghe-yang/libnet-rs.git" }
 async-trait = "0.1.89"
 futures-util = "0.3.31"
 rand = "0.8"

@@ -8,8 +8,8 @@ use rand::SeedableRng;
 
 #[test]
 fn calculate_size() {
-    let n = 100;
-    let t = 33;
+    let n = 121;
+    let t = 40;
     let (pks, sks) = gen_keypairs(n);
     let mut rng = StdRng::from_rng(OsRng).unwrap();
     let sigma = 1f64;

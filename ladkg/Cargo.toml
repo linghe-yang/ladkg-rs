@@ -8,7 +8,7 @@ config = { package = "config", path="../config"}
 types = { package = "types", path="../types"}
 crypto = {package = "crypto", path = "../crypto"}
 acs = {package = "aacs", path= "../consensus/aacs"}
-network = { package = "network", git = "https://github.com/akhilsb/libnet-rs.git" }
+network = { package = "network", git = "https://github.com/linghe-yang/libnet-rs.git" }
 avsss = { package = "avsss", git = "https://github.com/linghe-yang/lvss.git"}
 hashrand = { package = "hashrand", git = "https://github.com/linghe-yang/hashrand-rs.git" }
 hrconfig = {package = "config" , git = "https://github.com/linghe-yang/hashrand-rs.git"}

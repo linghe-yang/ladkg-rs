@@ -16,8 +16,8 @@ Size of sup_share: 1014.428 KB
 Size of secret key: 5.352 KB
 Size of public key: 2.676 KB
 
-n=100
-Size of share: 606.276 KB
+n=121
+Size of share: 662.714 KB
 Size of sup_share: 1014.460 KB
 Size of secret key: 5.352 KB
 Size of public key: 2.676 KB
