@@ -239,7 +239,12 @@ class PlotParameters:
             self.nodes = [int(x) for x in nodes]
 
             self.kappa = int(json['kappa'])
-            self.td = int(json['trans_delay'])
+
+            trans_delay = json['trans_delay']
+            trans_delay = trans_delay if isinstance(trans_delay, list) else [trans_delay]
+            if not trans_delay:
+                raise ConfigError('Missing number of trans_delay')
+            self.td = [int(x) for x in trans_delay]
 
         except KeyError as e:
             raise ConfigError(f'Malformed bench parameters: missing key {e}')

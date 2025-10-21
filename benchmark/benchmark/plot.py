@@ -24,11 +24,11 @@ class Plotter:
         plt.style.use('classic')
         matplotlib.rcParams.update({
             'font.family': 'DejaVu Serif',  # Fallback for Times New Roman
-            'font.size': 10,
-            'axes.labelsize': 5,  # Smaller axis labels
-            'xtick.labelsize': 5,  # Smaller tick labels
-            'ytick.labelsize': 5,  # Smaller tick labels
-            'legend.fontsize': 6,  # Smaller legend font
+            'font.size': 14,
+            'axes.labelsize': 9,  # Smaller axis labels
+            'xtick.labelsize': 6,  # Smaller tick labels
+            'ytick.labelsize': 6,  # Smaller tick labels
+            'legend.fontsize': 7,  # Smaller legend font
             'lines.linewidth': 1.5,
             'figure.figsize': (3.5, 2.5),  # IEEE single-column width
             'axes.grid': True,
@@ -38,8 +38,8 @@ class Plotter:
             'axes.linewidth': 0.5,  # Thinner axes
             'xtick.direction': 'out',  # Ticks outward
             'ytick.direction': 'out',  # Ticks outward
-            'xtick.major.size': 3,  # Shorter tick length
-            'ytick.major.size': 3,  # Shorter tick length
+            'xtick.major.size': 2,  # Shorter tick length
+            'ytick.major.size': 2,  # Shorter tick length
         })
 
     def plot_vss_bar(self, faults, kappa):
@@ -74,7 +74,7 @@ class Plotter:
             # Set grid below bars
             ax.set_axisbelow(True)
             # Stack the bars with thinner edges
-            ax.bar(x, sharing, bar_width, label='Sharing', color=colors[0], edgecolor='black', linewidth=0.3)
+            ax.bar(x, sharing, bar_width, label='Share', color=colors[0], edgecolor='black', linewidth=0.3)
             ax.bar(x, reply, bar_width, bottom=sharing, label='Reply', color=colors[1], edgecolor='black', linewidth=0.3)
             ax.bar(x, transcript_comp, bar_width, bottom=np.array(sharing) + np.array(reply),
                    label='Trans. Gen', color=colors[2], edgecolor='black', linewidth=0.3)
@@ -82,16 +82,16 @@ class Plotter:
                    label='Trans. Veri.', color=colors[3], edgecolor='black', linewidth=0.3)
 
             # Customize plot
-            ax.set_xlabel(f'n={committee_size}   Trans. waiting time (ms)')
+            ax.set_xlabel(f'Trans. waiting time (ms)')
             ax.set_ylabel('Duration (ms)')
             ax.set_xticks(x)
             ax.set_xticklabels(waiting_times, rotation=45)
-            ax.legend(loc='upper center', bbox_to_anchor=(0.5, 1.25), ncol=2, frameon=False)
+            ax.legend(loc='upper center', bbox_to_anchor=(0.5, 1.15), ncol=4, frameon=False)
             ax.yaxis.grid(True)
 
-            # Adjust layout to make space for legend
-            plt.subplots_adjust(top=0.8)
-            plt.tight_layout()
+            # Adjust layout to minimize white space
+            plt.subplots_adjust(left=0.1, right=0.85, top=0.65, bottom=0.15)
+            plt.tight_layout(pad=0.5)
 
             # Save plot
             output_path = os.path.join(self.plot_dir, f'vss_bar_f{faults}_k{kappa}_c{committee_size}.png')
@@ -129,16 +129,16 @@ class Plotter:
             ax.bar(x, acs, bar_width, label='AACS', color='#e57373', edgecolor='black', linewidth=0.3)
 
             # Customize plot
-            ax.set_xlabel(f'n={committee_size}   Trans. waiting time (ms)')
+            ax.set_xlabel(f'Trans. waiting time (ms)')
             ax.set_ylabel('AACS Duration (ms)')
             ax.set_xticks(x)
             ax.set_xticklabels(waiting_times, rotation=45)
-            ax.legend(loc='upper center', bbox_to_anchor=(0.5, 1.25), ncol=1, frameon=False)
+            ax.legend(loc='upper center', bbox_to_anchor=(0.5, 1.15), ncol=1, frameon=False)
             ax.yaxis.grid(True)
 
-            # Adjust layout to make space for legend
-            plt.subplots_adjust(top=0.8)
-            plt.tight_layout()
+            # Adjust layout to minimize white space
+            plt.subplots_adjust(left=0.1, right=0.85, top=0.65, bottom=0.15)
+            plt.tight_layout(pad=0.5)
 
             # Save plot
             output_path = os.path.join(self.plot_dir, f'aacs_bar_f{faults}_k{kappa}_c{committee_size}.png')
@@ -183,8 +183,9 @@ class Plotter:
         y_max = max(acs_values)
         ax.set_ylim(bottom=min(acs_values) * 0.9, top=y_max * 1.1)
 
-        # Adjust layout
-        plt.tight_layout()
+        # Adjust layout to minimize white space
+        plt.subplots_adjust(left=0.1, right=0.95, top=0.85, bottom=0.15)
+        plt.tight_layout(pad=0.5)
 
         # Save plot
         output_path = os.path.join(self.plot_dir, f'aacs_kappa_f{faults}_c{committee_size}.png')
@@ -195,23 +196,32 @@ class Plotter:
             raise PlotError(f"Failed to save line plot: {str(e)}")
 
     def plot_dkg_comparison(self, faults, transaction_waiting_time):
-        """Generate line plot comparing DKG overall time across works."""
-        # Filter our work's results by faults, and transaction_waiting_time
-        our_results = [r for r in self.results if r.faults == faults
-                      and r.transaction_waiting_time == transaction_waiting_time]
-        if not our_results:
-            raise PlotError(f"No results found for faults={faults}, transaction_waiting_time={transaction_waiting_time}")
+        """Generate line plot comparing DKG overall time across works for multiple transaction waiting times."""
+        # Validate input
+        if not isinstance(transaction_waiting_time, list):
+            raise PlotError("transaction_waiting_time must be a list")
 
-        # Extract nodes and DKG overall time for our work
-        our_results = sorted(our_results, key=lambda x: x.committee_size)
-        our_nodes = [r.committee_size for r in our_results]
-        our_times = [r.dkg_overall_time for r in our_results]
+        # Collect data for our work for each transaction_waiting_time
+        our_data = {}
+        for twt in transaction_waiting_time:
+            # Filter results by faults and transaction_waiting_time
+            filtered_results = [r for r in self.results if r.faults == faults and r.transaction_waiting_time == twt]
+            if not filtered_results:
+                continue
+            # Sort by committee_size (nodes)
+            filtered_results = sorted(filtered_results, key=lambda x: x.committee_size)
+            nodes = [r.committee_size for r in filtered_results]
+            times = [r.dkg_overall_time for r in filtered_results]
+            our_data[twt] = (nodes, times)
+
+        if not our_data:
+            raise PlotError(f"No results found for faults={faults} and any transaction_waiting_time in {transaction_waiting_time}")
 
         # Read other-*.txt files
         other_data = {}
         other_files = glob(join('results', 'other-*.txt'))
         for filename in other_files:
-            # Extract work name from filename (e.g., 'adkg' from 'other-Das et al bls12381.txt')
+            # Extract work name from filename (e.g., 'adkg' from 'other-adkg.txt')
             work_name = os.path.basename(filename).replace('other-', '').replace('.txt', '')
             nodes = []
             times = []
@@ -222,12 +232,11 @@ class Plotter:
                     if lines[i].startswith('X ='):
                         try:
                             x = int(lines[i].split('=')[1].strip())
-                            # Check if next line exists and starts with 'Y ='
                             if i + 1 < len(lines) and lines[i + 1].startswith('Y ='):
                                 y = float(lines[i + 1].split('=')[1].strip())
                                 nodes.append(x)
                                 times.append(y)
-                                i += 2  # Skip both X and Y lines
+                                i += 2
                             else:
                                 i += 1
                         except (ValueError, IndexError):
@@ -237,50 +246,55 @@ class Plotter:
                         i += 1
             # Sort by nodes for consistent plotting
             sorted_pairs = sorted(zip(nodes, times), key=lambda x: x[0])
-            if sorted_pairs:  # Only add if data is valid
+            if sorted_pairs:
                 nodes, times = zip(*sorted_pairs)
                 other_data[work_name] = (list(nodes), list(times))
 
-        if not our_results and not other_data:
+        if not our_data and not other_data:
             raise PlotError("No valid data found for plotting DKG comparison")
 
         fig, ax = plt.subplots()
-        # Plot our work with black 'x' marker
-        ax.plot(our_nodes, our_times, marker='x', linestyle='-', color='#e67e22', markeredgecolor='black', label='Our Work')
-
-        # Plot other works with different colors and black 'x' markers
-        colors = ['#4a90e2', '#ff9f43', '#4caf50', '#b39ddb', '#e57373']
-        for idx, (work_name, (nodes, times)) in enumerate(other_data.items()):
+        # Plot our work for each transaction_waiting_time
+        colors = ['#fa6161', '#fab361', '#d6fa61', '#61faeb', '#5e72f7', '#c95ef7', '#f75cac']
+        base_colors = ['#c2c0c1', '#575656']
+        for idx, (twt, (nodes, times)) in enumerate(our_data.items()):
             color = colors[idx % len(colors)]
-            ax.plot(nodes, times, marker='x', linestyle='-', color=color, markeredgecolor='black', label=work_name)
+            ax.plot(nodes, times, marker='x', markersize=3, linestyle='-',linewidth=0.9, color=color, markeredgecolor='black', label=f'Ours TW = {twt} ms')
+
+        # Plot other works with different colors
+        for idx, (work_name, (nodes, times)) in enumerate(other_data.items()):
+            color = base_colors[idx % len(base_colors)]
+            ax.plot(nodes, times, marker='x', markersize=3, linestyle='-',linewidth=0.9, color=color, markeredgecolor='black', label=work_name)
 
         # Customize plot
         ax.set_xlabel('Nodes')
         ax.set_ylabel('DKG Overall Time (ms)')
         # Set fixed x-ticks starting from 0 with step size 20
-        all_nodes = sorted(set(our_nodes + [n for nodes, _ in other_data.values() for n in nodes]))
+        all_nodes = sorted(set(sum([nodes for nodes, _ in our_data.values()], []) +
+                              [n for nodes, _ in other_data.values() for n in nodes]))
         max_nodes = max(all_nodes) if all_nodes else 100
         x_ticks = np.arange(0, max_nodes + 20, 20)
         ax.set_xticks(x_ticks)
         ax.yaxis.grid(True)
 
         # Add padding to y-axis
-        all_times = our_times + [t for _, times in other_data.values() for t in times]
+        all_times = sum([times for _, times in our_data.values()], []) + \
+                    [t for _, times in other_data.values() for t in times]
         y_max = max(all_times) if all_times else 1
         y_min = min(all_times) if all_times else 0
         ax.set_ylim(bottom=y_min * 0.9, top=y_max * 1.1)
 
         # Place legend above the plot
-        ax.legend(loc='upper center', bbox_to_anchor=(0.5, 1.25), ncol=3, frameon=False)
+        ax.legend(loc='upper center', bbox_to_anchor=(0.5, 1.15), ncol=3, frameon=False)
 
-        # Adjust layout to make space for legend
-        plt.subplots_adjust(top=0.8)
-        plt.tight_layout()
+        # Adjust layout to minimize white space
+        plt.subplots_adjust(left=0.1, right=0.95, top=0.85, bottom=0.15)
+        plt.tight_layout(pad=0.5)
 
         # Save plot
-        output_path = os.path.join(self.plot_dir, f'dkg_comparison_f{faults}_t{transaction_waiting_time}.png')
+        output_path = os.path.join(self.plot_dir, f'dkg_comparison_f{faults}.png')
         try:
-            plt.savefig(output_path, format='png', dpi=400, bbox_inches='tight')
+            plt.savefig(output_path, format='png', dpi=400,  bbox_inches='tight')
             plt.close(fig)
         except Exception as e:
             raise PlotError(f"Failed to save DKG comparison plot: {str(e)}")

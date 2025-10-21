@@ -13,7 +13,7 @@ use fnv::FnvHashMap;
 use hashrand::node::HashRand;
 use hrconfig::Node as HashRandConfig;
 use hrcrypto::Algorithm as HashRandAlgorithm;
-use log::{info};
+use log::{debug, error, info};
 use nalgebra::{DVector};
 use network::Acknowledgement;
 use network::plaintcp::{CancelHandler, TcpReceiver, TcpReliableSender};
@@ -112,7 +112,7 @@ impl Context {
             TcpReliableSender::<Replica, VSSWrapperMsg, Acknowledgement>::with_peers(
                 consensus_addrs.clone(),
             );
-        info!("DKG Consensus addrs {:?}", consensus_addrs);
+        // info!("DKG Consensus addrs {:?}", consensus_addrs);
 
         let (coin_construct, coin_const_recv) = mpsc::channel(10000);
         let (coin_send, mut coin_recv) = channel::<(u32,u128)>(10000);
@@ -278,7 +278,7 @@ impl Context {
         let msg = msg.protmsg;
         match msg {
             VSSMsg::VSSPrivateShare(my_share, sender) => {
-                info!("Node {}: VSS private share received from: {}", self.myid, sender);
+                debug!("Node {}: VSS private share received from: {}", self.myid, sender);
                 if !self.pub_shares.contains_key(&sender) {
                     self.unvalidated_shares.entry(sender).or_insert(my_share);
                 } else {
@@ -286,7 +286,7 @@ impl Context {
                 }
             }
             VSSMsg::VSSPublicShare(pub_share, sender) => {
-                info!("Node {}: VSS public share received from: {}", self.myid, sender);
+                debug!("Node {}: VSS public share received from: {}", self.myid, sender);
                 if !self.verify_pub_share(&pub_share) {return Ok(())}
                 self.pub_shares.entry(sender).or_insert(pub_share.clone());
                 if self.unvalidated_shares.contains_key(&sender) {
@@ -296,7 +296,7 @@ impl Context {
                 }
             }
             VSSMsg::VSSReply(sig, sender) => {
-                info!("Node {}: VSS reply received from: {}", self.myid ,sender);
+                debug!("Node {}: VSS reply received from: {}", self.myid ,sender);
                 if self.transcripts.read().await.contains_key(&self.myid) {
                     return Ok(());
                 }
@@ -321,7 +321,7 @@ impl Context {
                 }
             }
             VSSMsg::DKGPubKey(pub_key, sender) => {
-                info!("Node {}: DKG PubKey share received from: {}", self.myid, sender);
+                debug!("Node {}: DKG PubKey share received from: {}", self.myid, sender);
                 if self.th_pk != R::default() {return Ok(())}
                 self.th_pk_shares.entry(sender).or_insert(*pub_key);
                 if self.th_pk_shares.len() >= (self.num_nodes - self.num_faults) {
@@ -339,7 +339,7 @@ impl Context {
                         self.add_cancel_handler(cancel_handler);
 
                     }else {
-                        info!("Node {}: Failed to reconstruct public key", self.myid);
+                        error!("Node {}: Failed to reconstruct public key", self.myid);
                     }
                 }
             }
@@ -404,7 +404,7 @@ impl Context {
             self.th_pk_shares.entry(self.myid).or_insert(b_i);
             let msg = VSSMsg::DKGPubKey(Box::new(b_i), self.myid);
             self.broadcast(msg).await;
-            info!("Node {}: public key share broadcasted", self.myid);
+            debug!("Node {}: public key share broadcasted", self.myid);
         }
 
         Ok(())

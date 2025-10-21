@@ -138,7 +138,7 @@ impl Delphi {
         // let _sleep_time = sleep - SystemTime::now().duration_since(UNIX_EPOCH)
         // .unwrap()
         // .as_millis();
-        log::info!("Delphi Consensus addrs {:?}", consensus_addrs);
+        // log::info!("Delphi Consensus addrs {:?}", consensus_addrs);
         let consensus_net = Arc::new(Mutex::new(TcpReliableSender::<
             Replica,
             WrapperMsg,

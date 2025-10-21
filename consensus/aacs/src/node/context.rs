@@ -88,7 +88,7 @@ impl Context {
         let consensus_net = TcpReliableSender::<Replica, ACSWrapperMsg, Acknowledgement>::with_peers(
             consensus_addrs.clone(),
         );
-        info!("ACS Consensus addrs {:?}", consensus_addrs);
+        // info!("ACS Consensus addrs {:?}", consensus_addrs);
 
         let (val_tx, val_rx) = channel(100);
         let (res_tx, res_rx) = channel(100);

@@ -502,7 +502,7 @@ class Bench:
             Print.heading(f'Run {i + 1}/{bench_parameters.runs}')
             try:
                 self._run_single(
-                    selected_hosts, 20, bench_parameters, debug
+                    selected_hosts, 10, bench_parameters, debug
                 )
 
                 faults = bench_parameters.faults
@@ -529,12 +529,14 @@ class Bench:
             dkg_params = DKGParameters(dkg_params)
         except ConfigError as e:
             raise BenchError('Invalid nodes or bench parameters', e)
+        selected_hosts = self._select_hosts(bench_parameters)
 
         faults = bench_parameters.faults
         n = bench_parameters.nodes
         k = bench_parameters.kappa
         d = dkg_params.trans_delay
-        logger = LogParser.process(PathMaker.logs_path(), faults=faults)
+        logger = self._logs(selected_hosts, faults)
+        # logger = LogParser.process(PathMaker.logs_path(), faults=faults)
         logger.print(PathMaker.result_file(
             faults,
             n,

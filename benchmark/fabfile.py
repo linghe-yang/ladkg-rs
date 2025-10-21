@@ -8,11 +8,7 @@ from benchmark.remote import Bench, BenchError
 from benchmark.utils import Print
 
 
-# nodes = 4: kappa = 2,4 trans_delay=0, 5,10,20
-# nodes = 10; kappa = 4 trans_delay=0, 5,10,20
-
-
-nodes = 31
+nodes = 10
 
 @task
 def remote(ctx, debug=False):
@@ -22,19 +18,19 @@ def remote(ctx, debug=False):
         'faults': 0,
         'nodes': nodes,
         'runs': 1,
-        'kappa': 15,
-        'duration': 180, # + 20 ms
+        'kappa': 4,
+        'duration': 40, # + 20 ms
     }
     dkg_params = {
         'delta': 10,
-        'epsilon': 1652, # n=10,19999 n=31,6451 n=64,3124 n=100,1999 n=121,1652
+        'epsilon': 19999, # n=10,19999 n=31,6451 n=64,3124 n=100,1999 n=121,1652
         'tri': 100000,
         'hr_batch': 40,
         'hr_freq': 20,
         'trans_delay': 0  # ms
     }
     try:
-        Bench(ctx).run(bench_params, dkg_params, debug, False, False)
+        Bench(ctx).run(bench_params, dkg_params, debug, True, True)
     except BenchError as e:
         Print.error(e)
 
@@ -70,7 +66,7 @@ def local(ctx, debug=True):
         'faults': 0,
         'nodes': nodes,
         'kappa': 2,
-        'duration': 30,
+        'duration': 20,
     }
     dkg_params = {
         'delta': 10,
@@ -89,7 +85,7 @@ def local(ctx, debug=True):
 
 
 @task
-def create(ctx, nodes=nodes):
+def create(ctx, nodes=90):
     ''' Create a testbed'''
     try:
         InstanceManager.make().create_instances(nodes + 1)
@@ -147,8 +143,8 @@ def plot(ctx):
     plot_params = {
         'faults': 0,
         'nodes': [10,31,64,121],
-        'kappa': 15,
-        'trans_delay': 0
+        'kappa': 4,
+        'trans_delay': [0, 500,1000,2000]
     }
     try:
         Plotter.plot(plot_params)
