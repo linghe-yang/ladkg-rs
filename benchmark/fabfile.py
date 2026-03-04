@@ -3,7 +3,8 @@ from fabric import task
 
 from benchmark.instance import InstanceManager
 from benchmark.local import LocalBench
-from benchmark.plot import Plotter, PlotError
+# from benchmark.plot import Plotter, PlotError
+from benchmark.plot_zh import Plotter, PlotError
 from benchmark.remote import Bench, BenchError
 from benchmark.utils import Print
 
@@ -143,7 +144,7 @@ def plot(ctx):
     plot_params = {
         'faults': 0,
         'nodes': [10,31,64,121],
-        'kappa': 4,
+        'kappa': 15,
         'trans_delay': [0, 500,1000,2000]
     }
     try:
